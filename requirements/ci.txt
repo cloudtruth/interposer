@@ -1,0 +1,5 @@
+# prerequisites for continuous integration
+# for normal local development, use "make prerequisites" in the parent project
+pip (~= 20.2)
+setuptools (~= 49.6)
+tox (~= 3.19)

@@ -1,0 +1,7 @@
+graft interposer
+graft requirements
+prune tests
+include LICENSE
+include VERSION
+global-exclude __pycache__
+global-exclude *.py[co]

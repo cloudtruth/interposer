@@ -1,0 +1,7 @@
+flake8 (~= 3.8)
+flake8-sfs (~= 0.0.3)
+packaging (~= 20.4)
+pip (~= 20.2)
+pre-commit (~= 2.7)
+setuptools (~= 49.6)
+tox (~= 3.19)
