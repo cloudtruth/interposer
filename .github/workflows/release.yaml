@@ -1,0 +1,57 @@
+#
+# Copyright (C) 2019 - 2020 Tuono, Inc.
+# All Rights Reserved
+#
+---
+name: release
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  publish-gemfury:
+    # publishes a pypi package to GemFury
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.7.7]
+
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "${GITHUB_CONTEXT}"
+
+      - uses: actions/checkout@v2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Build Dependencies
+        run: python3 -m pip install -rrequirements/ci.txt
+
+      - name: Publish
+        id: publish
+        run: |
+          rm -rf dist/
+          VERSION=$(python3 setup.py --version)
+          echo "::set-output name=version::$VERSION"
+          python3 setup.py sdist
+          PACKAGE=$(ls dist/*)
+          curl --fail -F package=@${PACKAGE} https://${{ secrets.GEMFURY_PUSH_TOKEN }}@push.fury.io/tuono/
+
+      - name: Show Version
+        run: echo "${{ steps.publish.outputs.version }}"
+
+      - name: Notify
+        uses: homoluctus/slatify@v2.1.0
+        if: always()
+        with:
+          type: ${{ job.status }}
+          job_name: ${{ github.repository }} publish ${{ steps.publish.outputs.version }} to gemfury
+          username: tubot
+          icon_emoji: ":monorail:"
+          url: ${{ secrets.SLACK_WEBHOOK_URL }}
