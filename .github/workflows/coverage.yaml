@@ -1,0 +1,51 @@
+#
+# Copyright (C) 2019 - 2020 Tuono, Inc.
+# All Rights Reserved
+#
+# On a pull request or push into master, this runs the unit tests
+# and reports coverage.
+#
+---
+name: coverage
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.7.7]
+
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "${GITHUB_CONTEXT}"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/checkout@v2
+
+      - name: Install Build Dependencies
+        run: python3 -m pip install -rrequirements/ci.txt
+
+      - name: Enforce pre-commit
+        run: |
+          python3 -m pip install pre-commit
+          pre-commit install
+          pre-commit run -a
+
+      - name: Build, Test, Coverage
+        run: make coverage
+
+      - uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
