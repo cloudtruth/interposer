@@ -151,9 +151,6 @@ class Interposer(object):
                 # Open db file read-only
                 self.tape = shelve.open(str(self.deck), flag="r", protocol=4)
                 self.version = self.tape.get("_version", 1)
-                self.logger.debug(
-                    f"TAPE: Opened {self.deck} for playback using version {self.version}"
-                )
                 # Load the call order if present
                 if "deck_call_order" in self.tape:
                     self.call_order = self.tape["deck_call_order"]
