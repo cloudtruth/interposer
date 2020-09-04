@@ -13,8 +13,8 @@ from setuptools import setup
 name = "interposer"
 description = "A code intercept wrapper with recording and playback options."
 major = 0
-minor = 5
-patch = 1
+minor = 6
+patch = 0
 
 # Everything below should be cookie-cutter
 

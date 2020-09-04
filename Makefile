@@ -7,7 +7,7 @@ PROJECT := interposer
 
 STAGEDIR := ~/.cache/pypiserver/$(PROJECT)
 
-.PHONY: all clean dist pdb prerequisites shell stage test test-loop test-setup
+.PHONY: all clean dist example pdb prerequisites shell stage test test-loop test-setup
 
 all: test
 
@@ -26,6 +26,9 @@ coverage:
 
 dist: clean
 	STAGEDIR=$(STAGEDIR) python3 setup.py sdist
+
+example:
+	tox -- -rsx tests/example_weather_test.py
 
 pdb:
 	tox -- --pdb

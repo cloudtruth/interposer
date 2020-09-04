@@ -49,26 +49,19 @@ in a wrapped class.
    - The return value, if no exception was raised
    - The exception raised, should one be raised
 
-In most cases you want to leverage environment variables with
-your own method that retrieves a class, for example if you want
-to wrap the AWS boto3 library:
+## Example
 
-    import boto3
-    import interposer
-    import os
+A common testing pattern is to use unittest.mock.patch to replace a
+class imported into an implementation.  You can use interposer in the
+same way to inject an interposed version of that imported class to
+enable playback and record.
 
-    if os.get("RECORDING_FILE"):
-        global client_args
-        wrapper = interposer.Interposer(os.get("RECORDING_FILE"), interposer.Mode.Recording)
-        client = boto3.client("ec2", **client_args)
-        wrapped_client = wrapper.wrap(client)
-        return wrapped_client
-
-Now any method call on `client` will be recorded.  To play back the same
-stream with the same code, change the interposer mode to Playback and re-run
-the code.  Instead of calling boto3, the interposer will intercept and provide
-the same return values or exceptions that boto3 provided during recording for
-given combinations of method names and parameters.
+An example is included in the tests directory.  A checked-in recording
+is used to playback a previous interaction with noaa_sdk.  To re-record,
+run "RECORDING=1 make example".  To just play back the example, run
+"make example".  Note the time difference between the recording run
+and the playback run - recording takes at least 5 seconds, but the playback
+is almost instantaneous.
 
 ## Restrictions
 

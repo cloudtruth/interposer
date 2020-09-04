@@ -8,6 +8,8 @@ import shutil
 import tempfile
 import unittest
 
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 
 from interposer import Interposer
@@ -22,6 +24,10 @@ rv = True
 
 def standalone_method():
     return rv
+
+
+class MyEnum(Enum):
+    FOO = 1
 
 
 class MyVerySpecificError(RuntimeError):
@@ -39,18 +45,27 @@ class SomeClass(object):
         """
         self.result = result
 
-    def say_hi(self, greeting: str = "hello") -> str:
+    def say_hi(self, greeting: str = "hello", second: object = None) -> str:
         """
         Returns the result stored in the initializer.
         Raises an error if we're in playback mode, since we shouldn't be called.
+
+        second is used to ensure we can encode some types natively like datetime
         """
         if isinstance(self.result, Exception):
             raise self.result
-        return "hello " + str(self.result)
+        return f"{greeting} {self.result}" + ("" if not second else " " + str(second))
 
     def give_up(self):
         if self.throw_exception:
             raise MyVerySpecificError("ouchies")
+
+    @property
+    def get_complex_stuff(self):
+        """
+        In this case the return value is a class so that has to be wrapped.
+        """
+        return SomeClass(self.result)
 
 
 class InterposerTest(unittest.TestCase):
@@ -83,6 +98,25 @@ class InterposerTest(unittest.TestCase):
             # rv is still False, but since we're playing back...
             self.assertEqual(wm(), True)
             self.assertEqual(wm(), False)
+
+    def test_ok_additional_types(self):
+        """
+        Use datetime and enum in arguments and it is okay, we convert to
+        a form that can be json encoded.
+        """
+        t = datetime.utcnow()
+        with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
+            # if actually called, say_hi should return True
+            wt = uut.wrap(SomeClass(True))
+            assert wt.say_hi(second=t) == f"hello True {str(t)}"
+            assert wt.say_hi(second=MyEnum.FOO) == "hello True MyEnum.FOO"
+
+        with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
+            wt = uut.wrap(SomeClass(False))
+            assert wt.say_hi(second=t) == f"hello True {str(t)}"
+            assert wt.say_hi(second=MyEnum.FOO) == "hello True MyEnum.FOO"
+            with self.assertRaises(PlaybackError):
+                wt.say_hi(second="foobar")  # never called during recording
 
     def test_good_class_wrapping(self):
         """
@@ -124,6 +158,24 @@ class InterposerTest(unittest.TestCase):
             # so we replay the exception
             with self.assertRaises(MyVerySpecificError) as re:
                 wt.give_up()
+
+    def test_property_handling(self):
+        """
+        This proves recording and playback are working property for class properties.
+        In this case we have a class property that returns a new class initialized with
+        the same value, however during playback we see the recording is replayed, otherwise
+        it would have said "hello False".
+        """
+        with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
+            # if actually called, say_hi should return True
+            t = SomeClass(True)
+            wt = uut.wrap(t)
+            assert wt.get_complex_stuff.say_hi() == "hello True"
+
+        with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
+            t = SomeClass(False)
+            wt = uut.wrap(t)
+            assert wt.get_complex_stuff.say_hi() == "hello True"
 
     def test_multiple_channels_multiple_results(self):
         """ Prove the same wrapped entity can be disambiguated with channels. """

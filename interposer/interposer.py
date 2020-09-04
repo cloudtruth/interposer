@@ -9,10 +9,13 @@ import shelve
 import types
 
 from contextlib import AbstractContextManager
+from datetime import datetime
 from enum import auto
 from enum import Enum
 from hashlib import sha1
 from pathlib import Path
+from pprint import pformat
+from typing import Dict
 
 from wrapt import ObjectProxy
 
@@ -37,12 +40,25 @@ class PlaybackError(KeyError):
     pass
 
 
+class DefaultParameterEncoder(json.JSONEncoder):
+    """
+    Handles conversion of commonly used types not normally convertible
+    to JSON, such as datetime and enumerations.  This is the conversion
+    that parameters (*args, **kwargs) passed to a method go through
+    before they are hashed.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            obj = str(obj)
+        elif isinstance(obj, Enum):
+            obj = obj.value
+        return obj
+
+
 class Interposer(object):
     """
-    TODO: turn this into a README and make it usable...
-          right now it's between half and mostly right...
-
-    Record any function calls and plays back the result.
+    Record any function calls and play back the result later.
 
     The recorder is useful where you are dealing with a third party
     library and you would like to:
@@ -54,96 +70,56 @@ class Interposer(object):
 
     Recording has advantages and disadvantages, so the right solution
     for your situation depends on many things.  Recording eliminates
-    the need to produce and maintain mocks.  Mocks of third party
-    libraries that change or are not well understood are fragile and
-    lead to a false sense of safety.  Recordings on the other hand
-    are always correct, but they need to be regenerated when your
-    logic changes around the third party calls.
-
-    Important:
-      - This is a resource, so you need to call open() and close() or
-        use the ScopedInterposer context manager.
-
-    Usage:
-      1. Instantiate an Interposer with a datafile path, and set
-         the mode to Recording.
-      2. To wrap something, call wrap() and pass in the definition.
-      3. Use the returned wrapper as if it were the actual definition
-         that was wrapped.
-      4. Every use of the wrapped definition will record:
-         - The call name
-         - The parameters (positional and keyword)
-         - The return value, if no exception was raised
-         - The exception raised, should one be raised
-
-    Restrictions:
-      - Return values and Exceptions must be safe for pickling.  Some
-        third party APIs use local definitions for exceptions, for example,
-        and local definitions cannot be pickled.  If you get a pickling
-        error, you should subclass Interposer and provide your own
-        cleanup routine(s) as needed to substitute a class that can be
-        substituted for the local definition.
-
-    Advanced Usage:
-      - FIXME
-      - During playback, the method call and parameters are matched
-        up against previously recorded calls, and either a value is
-        returned or an exception is raised.
-      - If you have sensitive information you do not want recorded,
-        subclass Interposer and provide your own cleanup routines
-        to make the data safe.
-      - You can set the environment variable RECORDING_CONTEXT to
-        modify the recording and playback; if present this string
-        will be added to disambiguate recordings in the same datafile.
+    the need to produce and maintain mocks of third party libraries.
+    Mocks of third party libraries that change or are not well
+    understood are fragile and lead to a false sense of safety.
+    Recordings on the other hand are always correct, but they need to
+    be regenerated when your logic changes around the third party calls,
+    or when the third party changes.
 
     Recording file format history:
       -  1: code did not record exceptions
       -  2: added exception recording and playback support
       -  3: renamed "context" to "channel" maintaining compatibility with v2 recordings
-      -  4: ordinal counting of calls for linear playback?  (@healem) ?
-
-    Attributes:
-        tape:  The shelve instance that stores the recordings
-
-    Methods:
-        record:   Record a method call to a venue-specific API (like boto3)
-        playback: Playback the result of a previous recording
-
-    Gotchas / TODOs:
-      - Do not have two recorders active on the same datafile.
-      - Identical method names and parameter lists in different classes
-        are treated as equals.  Use the "channel" to differentiate them.
-        For example if you have a sequence of recordings that are played
-        back and they have some overlap, give each one a unique channel.
-        Channel is assigned when something is wrapped.
+      -  4: ordinal counting of calls for linear playback
+      -  5: support datetime and enum in argument lists
     """
 
-    VERSION = 4
+    VERSION = 5
 
-    def __init__(self, datafile: Path, mode: Mode, encoder=None):
+    def __init__(
+        self,
+        datafile: Path,
+        mode: Mode,
+        encoder: json.JSONEncoder = DefaultParameterEncoder,
+        loglevels: Dict[str, Dict[str, int]] = {
+            # opening and closing files
+            "fileio": {"open": logging.INFO, "close": logging.INFO},
+            # processing calls
+            "except": {"playback": logging.DEBUG, "recorded": logging.DEBUG},
+            "params": {"playback": logging.DEBUG, "recorded": logging.DEBUG},
+            "result": {"playback": logging.DEBUG, "recorded": logging.DEBUG},
+        },
+    ):
         """
         Initializer.
 
         Attributes:
           datafile (Path): The full path to the recording filename.
           mode (Mode): The operational mode - Playback or Recording.
-          encoder: used by json.dumps as the "cls" argument to encode more
-                   than just standard data types
+          encoder (json.JSONEncoder): parameter encoder to use for hashing
+          loglevels (Dict): logging level controls
         """
         self.call_order = {}
-        self.playback_call_order = {}
         self.deck = datafile
         self.encoder = encoder
         self.logger = logging.getLogger(__name__)
+        self.loglevels = loglevels
         self.mode = mode
+        self.playback_call_order = {}
         self.playback_index = {}
         self.tape = None
         self.version = self.VERSION
-        self.in_simulation = False
-
-        self.logger.debug(
-            f"TAPE: Initialized Interposer (v{self.VERSION}) with datafile={datafile}"
-        )
 
     def open(self):
         if not self.tape:
@@ -159,8 +135,9 @@ class Interposer(object):
                 self.tape = shelve.open(str(self.deck), flag="c", protocol=4)
                 self.tape["_version"] = self.VERSION
 
-            self.logger.debug(
-                f"TAPE: Opened {self.deck} for {self.mode} using version {self.version}"
+            self.logger.log(
+                self.loglevels["fileio"]["open"],
+                f"TAPE: Opened {self.deck} for {self.mode} using version {self.version}",
             )
 
     def close(self):
@@ -169,6 +146,10 @@ class Interposer(object):
                 self.tape["deck_call_order"] = self.call_order
             self.tape.close()
             self.tape = None
+            self.logger.log(
+                self.loglevels["fileio"]["close"],
+                f"TAPE: Closed {self.deck} for {self.mode} using version {self.version}",
+            )
 
     def wrap(self, thing, channel="default", as_method=False):
         """
@@ -226,7 +207,8 @@ class Interposer(object):
     def cleanup_parameters_post(self, params):
         """
         Modify parameters during playback before they are hashed to locate
-        a recording.
+        a recording.  This usually does the same thing as
+        cleanup_parameters_pre.
         """
         return params
 
@@ -251,7 +233,7 @@ class Interposer(object):
         """
         return result
 
-    def clear_for_execution(self, params):
+    def clear_for_execution(self, params) -> None:
         """
         Called before any method is actually executed.  This can be used to
         implement a mechanism that ensures only certain methods are called.
@@ -260,50 +242,6 @@ class Interposer(object):
         identify this situation.
         """
         pass
-
-    def _record(self, params: dict, result: object, exception: object = None):
-        """
-        Records the parameters and result of an API call.
-
-        To get the result of this recording at a later time, call playback:
-            _playback(params)
-
-        The result for each param signature are stored in a list, in the order the result is
-        recorded.  Playback will replay the result in the same order as the original recording.
-
-        Args:
-            params:  A dict containing: { method: <method called>, args: [args], kwargs: {kwargs} }
-            result: The result from the API call, as any python object that can be pickled
-            exception: The exception that occurred as a result of the API call, if any
-        """
-        # Use json.dumps to turn whatever parameters we have into a string, so we can hash it
-        prefix = sha1(  # nosec
-            json.dumps(params, sort_keys=True, cls=self.encoder).encode()
-        ).hexdigest()
-        result_key = f"{prefix}.results"
-
-        result_list = self.tape.get(result_key, [])
-        result_list.append((result, exception))
-
-        # record the call in the call_order list
-        if params["channel"] in self.call_order:
-            self.call_order[params["channel"]]["calls"].append(params)
-        else:
-            self.call_order[params["channel"]] = {}
-            self.call_order[params["channel"]]["calls"] = [params]
-
-        if exception is None:
-            self.logger.debug(
-                f"TAPE: Recording RESULT {result_key} call #{(len(result_list) - 1)} "
-                f"for params {params} "
-                f"type={(result.__class__.__name__ if result is not None else 'None')}"
-            )
-        else:
-            self.logger.debug(
-                f"TAPE: Recording EXCEPTION {result_key} call #{(len(result_list) - 1)} "
-                f"for params {params} type={(exception.__class__.__name__)}"
-            )
-        self.tape[result_key] = result_list
 
     def _playback(self, params: dict) -> object:
         """playback a previous recording
@@ -363,18 +301,68 @@ class Interposer(object):
             exception = recorded[1]
 
         if exception is None:
-            self.logger.debug(
+            self.logger.log(
+                self.loglevels["result"]["playback"],
                 f"TAPE: Playing back RESULT for {result_key} call #{index} "
-                f"for params {new_params} "
-                f"type={(result.__class__.__name__ if result is not None else 'None')}"
+                f"for params {new_params} hash={prefix} "
+                f"type={(result.__class__.__name__ if result is not None else 'None')}: "
+                f"{pformat(result)}",
             )
             return self.cleanup_result_post(result)
         else:
-            self.logger.debug(
+            self.logger.log(
+                self.loglevels["except"]["playback"],
                 f"TAPE: Playing back EXCEPTION for {result_key} call #{index} "
-                f"for params {new_params} type={(exception.__class__.__name__)}"
+                f"for params {new_params} hash={prefix}: {str(exception)}",
             )
             raise self.cleanup_exception_post(exception)
+
+    def _record(self, params: dict, result: object, exception: object = None):
+        """
+        Records the parameters and result of an API call.
+
+        To get the result of this recording at a later time, call playback:
+            _playback(params)
+
+        The result for each param signature are stored in a list, in the order the result is
+        recorded.  Playback will replay the result in the same order as the original recording.
+
+        Args:
+            params:  A dict containing: { method: <method called>, args: [args], kwargs: {kwargs} }
+            result: The result from the API call, as any python object that can be pickled
+            exception: The exception that occurred as a result of the API call, if any
+        """
+        # Use json.dumps to turn whatever parameters we have into a string, so we can hash it
+        prefix = sha1(  # nosec
+            json.dumps(params, sort_keys=True, cls=self.encoder).encode()
+        ).hexdigest()
+        result_key = f"{prefix}.results"
+
+        result_list = self.tape.get(result_key, [])
+        result_list.append((result, exception))
+
+        # record the call in the call_order list
+        if params["channel"] in self.call_order:
+            self.call_order[params["channel"]]["calls"].append(params)
+        else:
+            self.call_order[params["channel"]] = {}
+            self.call_order[params["channel"]]["calls"] = [params]
+
+        if exception is None:
+            self.logger.log(
+                self.loglevels["result"]["recorded"],
+                f"TAPE: Recording RESULT {result_key} call #{(len(result_list) - 1)} "
+                f"for params {params} hash={prefix} "
+                f"type={(result.__class__.__name__ if result is not None else 'None')}: "
+                f"{pformat(result)}",
+            )
+        else:
+            self.logger.log(
+                self.loglevels["except"]["recorded"],
+                f"TAPE: Recording EXCEPTION {result_key} call #{(len(result_list) - 1)} "
+                f"for params {params} hash={prefix}: {exception}",
+            )
+        self.tape[result_key] = result_list
 
 
 class ScopedInterposer(Interposer, AbstractContextManager):
@@ -399,7 +387,7 @@ class _InterposerClassWrapper(ObjectProxy):
 
     This class wraps a class, ensuring that every method called on the wrapped
     class gets transparently proxied by the _InterposerMethodWrapper allowing
-    that method call to be optionally recorded.  It will also wrap anyxi
+    that method call to be optionally recorded.  It will also wrap any
     attributes of the target class with this class, so that any methods on
     those embedded objects will also be wrapped.
     """
@@ -410,13 +398,17 @@ class _InterposerClassWrapper(ObjectProxy):
         self._self_recorder = recorder
 
     def __call__(self, *args, **kwargs):
-        return self.__wrapped__(*args, **kwargs)
+        attr = self.__wrapped__(*args, **kwargs)
+        return _InterposerClassWrapper(
+            self._self_recorder, attr, channel=self._self_channel
+        )
 
     def __getattr__(self, name):
         attr = super().__getattr__(name)
         if isinstance(attr, (types.FunctionType, types.MethodType)):
+            # this is pretty noisy
+            # self._self_recorder.logger.debug(f"TAPE: wrapping callable {self.__wrapped__}.{name}")
             # Wrap the methods that get called
-            # self.recorder.logger.debug(f"TAPE: wrapping method {name}")
             attr = _InterposerMethodWrapper(
                 self._self_recorder, attr, channel=self._self_channel
             )
@@ -424,9 +416,8 @@ class _InterposerClassWrapper(ObjectProxy):
             # Prevent infinite loops
             pass
         else:
-            # In the case of Azure, the methods are on sub-objects under the client object
-            # So we need to iterate down until we get to the method
-            # self.recorder.logger.debug(f"TAPE: wrapping attr {name}")
+            # this is pretty noisy
+            # self._self_recorder.logger.debug(f"TAPE: wrapping attribute {self.__wrapped__}.{name}")
             attr = _InterposerClassWrapper(
                 self._self_recorder, attr, channel=self._self_channel
             )
@@ -459,7 +450,6 @@ class _InterposerMethodWrapper(ObjectProxy):
                     params, self.__wrapped__(*args, **kwargs)
                 )
                 params = self._self_recorder.cleanup_parameters_pre(params)
-
                 self._self_recorder._record(params, result)
                 return result
             except Exception as ex:
