@@ -51,14 +51,16 @@ class DefaultParameterEncoder(json.JSONEncoder):
     def default(self, obj):
         """
         If we get here, the standard processor was unable to convert the
-        content to JSON.  We're the last thing standing in the way.
+        content to JSON.  We're the last thing standing in the way of a
+        successful conversion.
         """
         if isinstance(obj, datetime):
             return str(obj)
         elif isinstance(obj, Enum):
             return obj.value
-        # let the base class raise a TypeError
-        return json.JSONEncoder.default(self, obj)
+
+        # If we get here, all hope is lost; let the base class raise
+        return super().default(obj)
 
 
 class Interposer(object):
