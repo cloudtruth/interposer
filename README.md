@@ -18,13 +18,13 @@ allows you to:
 
 ### Testing
 
-To inject recording and playback into your tests, use the InterposerTestCase
+To inject recording and playback into your tests, use the `InterposedTestCase`
 class and patch interposed versions of external services.  An example of this
 can be found in the [example_weather_test](https://github.com/tuono/interposer/blob/develop/tests/example_weather_test.py),
 which tests [weather.py](https://github.com/tuono/interposer/blob/develop/interposer/_testing/weather.py).
 
-To generate a recording, InterposerTestCase looks for an environment variable
-named RECORDING and if set (and not empty), will generate a recording of the
+To generate a recording, `InterposedTestCase` looks for an environment variable
+named `RECORDING` and if set (and not empty), will generate a recording of the
 interaction with the interposed class(es):
 
 ```
@@ -50,7 +50,7 @@ sys     0m0.212s
 ```
 
 Given tox has a roughly 2 second startup time, we see the playback is
-essentially as fast as a handcrafted mock, but took less time to make!
+essentially as fast as a handcrafted mock, but took way less time to make!
 More details can be found in the Recording and Playback section below.
 
 ### Auditing
@@ -259,7 +259,7 @@ in a wrapped class.
 
 TODO: provide example!
 
-## Notes
+## Other Notes
 
 - Interposer is a resource, so you need to call open() and close() or
   use the ScopedInterposer context manager.
