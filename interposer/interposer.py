@@ -49,12 +49,16 @@ class DefaultParameterEncoder(json.JSONEncoder):
     """
 
     def default(self, obj):
+        """
+        If we get here, the standard processor was unable to convert the
+        content to JSON.  We're the last thing standing in the way.
+        """
         if isinstance(obj, datetime):
-            obj = str(obj)
+            return str(obj)
         elif isinstance(obj, Enum):
-            obj = obj.value
-        else:
-            return obj
+            return obj.value
+        # let the base class raise a TypeError
+        return json.JSONEncoder.default(self, obj)
 
 
 class Interposer(object):
