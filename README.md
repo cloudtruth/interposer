@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/tuono/interposer/workflows/coverage/badge.svg)](https://github.com/tuono/interposer/actions?query=workflow%3Acoverage)
 [![Release Status](https://github.com/tuono/interposer/workflows/release/badge.svg)](https://github.com/tuono/interposer/actions?query=workflow%3Arelease)
-[![codecov](https://codecov.io/gh/tuono/interposer/branch/master/graph/badge.svg?token=HKUTULQQSA)](https://codecov.io/gh/tuono/interposer)
+[![codecov](https://codecov.io/gh/tuono/interposer/branch/develop/graph/badge.svg?token=HKUTULQQSA)](https://codecov.io/gh/tuono/interposer)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 Interposer allows you to add selective recording and playback of interactions
