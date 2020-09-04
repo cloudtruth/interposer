@@ -4,6 +4,7 @@
 # All Rights Reserved.
 #
 __all__ = [
+    "DefaultParameterEncoder",
     "Interposer",
     "InterposedTestCase",
     "Mode",
@@ -11,5 +12,11 @@ __all__ = [
     "ScopedInterposer",
 ]
 
-from .interposer import Interposer, Mode, PlaybackError, ScopedInterposer
+from .interposer import (
+    DefaultParameterEncoder,
+    Interposer,
+    Mode,
+    PlaybackError,
+    ScopedInterposer,
+)
 from .testcase import InterposedTestCase

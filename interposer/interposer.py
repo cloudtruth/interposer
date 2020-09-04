@@ -53,7 +53,8 @@ class DefaultParameterEncoder(json.JSONEncoder):
             obj = str(obj)
         elif isinstance(obj, Enum):
             obj = obj.value
-        return obj
+        else:
+            return obj
 
 
 class Interposer(object):

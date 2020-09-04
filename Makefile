@@ -28,6 +28,8 @@ dist: clean
 	STAGEDIR=$(STAGEDIR) python3 setup.py sdist
 
 example:
+	# to record: RECORDING=1 make example
+	# to playback: make example
 	tox -- -rsx tests/example_weather_test.py
 
 pdb:
