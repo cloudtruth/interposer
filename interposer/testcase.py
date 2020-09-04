@@ -22,33 +22,35 @@ class InterposedTestCase(TestCase):
     wrapper.
     """
 
-    def setUp(self, *args, **kwargs) -> None:
+    def setUp(self, recordings: Path, cls: Interposer = Interposer) -> None:
         """
         Prepare for recording or playback based on the test name.
 
         Arguments:
+          cls (Interposer): allows subclassing Interposer
           recordings (Path): the location of the recordings
         """
-        tapedir = kwargs.pop("recordings", None)
-        super().setUp(*args, **kwargs)
+        super().setUp()
 
-        assert tapedir, "recordings location must be specified"
-        assert isinstance(tapedir, Path), "recordings location must be a pathlib.Path"
+        assert recordings, "recordings location must be specified"
+        assert isinstance(
+            recordings, Path
+        ), "recordings location must be a pathlib.Path"
 
         self.mode = Mode.Recording if os.environ.get("RECORDING") else Mode.Playback
-        self.tape = tapedir / f"{self.id()}.db"
+        self.tape = recordings / f"{self.id()}.db"
         if self.mode == Mode.Playback:
             # decompress the recording
             with gzip.open(str(self.tape) + ".gz", "rb") as fin:
                 with self.tape.open("wb") as fout:
                     fout.write(fin.read())
         else:
-            tapedir.mkdir(parents=True, exist_ok=True)
+            recordings.mkdir(parents=True, exist_ok=True)
 
-        self.interposer = Interposer(self.tape, self.mode)
+        self.interposer = cls(self.tape, self.mode)
         self.interposer.open()
 
-    def tearDown(self, *args, **kwargs) -> None:
+    def tearDown(self) -> None:
         """
         Finalize recording or playback based on the test name.
         """
@@ -62,4 +64,4 @@ class InterposedTestCase(TestCase):
         # self.tape is the uncompressed file - do not leave it around
         self.tape.unlink()
 
-        super().tearDown(*args, **kwargs)
+        super().tearDown()
