@@ -28,9 +28,10 @@ dist: clean
 	STAGEDIR=$(STAGEDIR) python3 setup.py sdist
 
 example:
-	# to record: RECORDING=1 make example
-	# to playback: make example
-	tox -- -rsx tests/example_weather_test.py
+	# requires "make prerequisites" to have been run once before
+	# to record: time RECORDING=1 make example
+	# to playback: time make example
+	tox tests/example_weather_test.py -- -o log_cli=True -o log_cli_level=DEBUG -s
 
 pdb:
 	tox -- --pdb
