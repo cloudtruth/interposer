@@ -4,19 +4,25 @@
 # All Rights Reserved.
 #
 __all__ = [
-    "DefaultParameterEncoder",
-    "Interposer",
     "InterposedTestCase",
+    "Interposer",
+    "InterposerEncoder",
+    "InterposerError",
     "Mode",
     "PlaybackError",
     "ScopedInterposer",
+    "WrappingError",
 ]
 
-from .interposer import (
-    DefaultParameterEncoder,
-    Interposer,
-    Mode,
+from .errors import (
+    InterposerError,
     PlaybackError,
+    WrappingError,
+)
+from .interposer import (
+    Interposer,
+    InterposerEncoder,
+    Mode,
     ScopedInterposer,
 )
 from .testcase import InterposedTestCase

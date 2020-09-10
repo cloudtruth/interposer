@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2019-09-10
+
+### Breaking
+
+- `wrap` no longer requires (or accepts) `as_method` for wrapping
+  class instantiations.
+- `wrap` raises WrappingError if something is not wrappable.
+
+### Changed
+
+- Added support for wrapping modules.
+- Added support for wrapping object instantiations from class definitions.
+- Added logging control for wrapping and calling.
+- Consolidated determination of whether something is `wrappable`.
+- Fixed wrapping of property results.
+- Fixed unnecessary wrapping of python primitives like `str`.
+
 ## [0.6.1] - 2019-09-04
 
 ### Changed

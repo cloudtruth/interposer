@@ -17,30 +17,25 @@ from pathlib import Path
 from pprint import pformat
 from typing import Dict
 
-from wrapt import ObjectProxy
+from wrapt import CallableObjectProxy
+
+from .errors import PlaybackError
+from .errors import WrappingError
 
 
 class Mode(Enum):
     """
     The running mode of the interposer.
+
+    In Recording mode, method and function calls get recorded.
+    In Playback mode, method and function calls get played back.
     """
 
     Playback = auto()
     Recording = auto()
 
 
-class PlaybackError(KeyError):
-    """
-    The interposer never recorded a method call with the parameters given,
-    or the sequence of calls somehow changed between recording and playback.
-
-    The recording needs to be regenerated due to code changes.
-    """
-
-    pass
-
-
-class DefaultParameterEncoder(json.JSONEncoder):
+class InterposerEncoder(json.JSONEncoder):
     """
     Handles conversion of commonly used types not normally convertible
     to JSON, such as datetime and enumerations.  This is the conversion
@@ -67,7 +62,7 @@ class Interposer(object):
     """
     Record any function calls and play back the result later.
 
-    The recorder is useful where you are dealing with a third party
+    The interposer is useful where you are dealing with a third party
     library and you would like to:
 
       - Occasionally ensure your code works live,
@@ -98,15 +93,18 @@ class Interposer(object):
         self,
         datafile: Path,
         mode: Mode,
-        encoder: json.JSONEncoder = DefaultParameterEncoder,
+        encoder: json.JSONEncoder = InterposerEncoder,
         loglevels: Dict[str, Dict[str, int]] = {
             # opening and closing files
             "fileio": {"open": logging.INFO, "close": logging.INFO},
+            # wrapping: NOISY!
+            "wrappr": {"call": logging.DEBUG, "wrap": logging.DEBUG},
             # processing calls
             "except": {"playback": logging.DEBUG, "recorded": logging.DEBUG},
             "params": {"playback": logging.DEBUG, "recorded": logging.DEBUG},
             "result": {"playback": logging.DEBUG, "recorded": logging.DEBUG},
         },
+        logprefix: str = "TAPE: ",
     ):
         """
         Initializer.
@@ -116,12 +114,14 @@ class Interposer(object):
           mode (Mode): The operational mode - Playback or Recording.
           encoder (json.JSONEncoder): parameter encoder to use for hashing
           loglevels (Dict): logging level controls
+          logprefix (str): common prefix for all interposer log messages
         """
         self.call_order = {}
         self.deck = datafile
         self.encoder = encoder
         self.logger = logging.getLogger(__name__)
         self.loglevels = loglevels
+        self.logprefix = logprefix
         self.mode = mode
         self.playback_call_order = {}
         self.playback_index = {}
@@ -142,9 +142,10 @@ class Interposer(object):
                 self.tape = shelve.open(str(self.deck), flag="c", protocol=4)
                 self.tape["_version"] = self.VERSION
 
-            self.logger.log(
-                self.loglevels["fileio"]["open"],
-                f"TAPE: Opened {self.deck} for {self.mode} using version {self.version}",
+            self._log(
+                "fileio",
+                "open",
+                f"opened {self.deck} for {self.mode} using version {self.version}",
             )
 
     def close(self):
@@ -153,35 +154,52 @@ class Interposer(object):
                 self.tape["deck_call_order"] = self.call_order
             self.tape.close()
             self.tape = None
-            self.logger.log(
-                self.loglevels["fileio"]["close"],
-                f"TAPE: Closed {self.deck} for {self.mode} using version {self.version}",
+            self._log(
+                "fileio",
+                "close",
+                f"closed {self.deck} for {self.mode} using version {self.version}",
             )
 
-    def wrap(self, thing, channel="default", as_method=False):
+    def wrap(self, thing, channel="default") -> "_InterposerWrapper":
         """
-        Wrap a class or a method for recording or playback.
+        Wrap something with the interposer.
 
-        The information is stored as part of a channel in the recording file.
-        This is useful to separate recordings so they do not experience crosstalk.
+        Modules are wrappable, then getattr to wrap...
+        Class definitions are wrappable, then called to wrap...
+        Class instantiations are wrappable, then getattr to wrap...
+        Class properties return potentially wrappable objects.
+        Class methods are wrappable and their calls get intercepted.
+        Bare function (and lambda) get intercepted.
 
         Arguments:
-          thing: the thing to wrap (a class or a method)
+          thing: the thing to wrap
           channel: the channel name.  If no channel is specified, everything is
-                   placed into a channel named "default"
-          as_method: record an initializer of a class with arguments where said
-                     class only provides properties and no methods
+                   placed into a channel named "default".
 
-          TODO: the presence of as_method means we're not properly capturing
-                the class initializer; I would consider this a HACK that needs
-                more thought.  Essentially any class we wrap, we're ignoring the
-                arguments as part of a signature; we're only recording method calls
-                and using only arguments on the method calls to disambiguate.
+        Raises:
+          WrappingError when the requested thing is not wrappable.
         """
-        if as_method or isinstance(thing, (types.FunctionType, types.MethodType)):
-            return _InterposerMethodWrapper(self, thing, channel=channel)
-        else:
-            return _InterposerClassWrapper(self, thing, channel=channel)
+        if not self.wrappable(thing):
+            raise WrappingError(thing)
+        self._log("wrappr", "wrap", f"wrapped {thing}")
+        return _InterposerWrapper(self, thing, channel=channel)
+
+    def wrappable(self, thing) -> bool:
+        """
+        Determine if something is wrappable.
+        """
+        result = (
+            thing is not None
+            and not isinstance(
+                thing,
+                (bool, str, int, float, complex, list, tuple, set, dict, bytearray),
+            )
+            and isinstance(
+                thing,
+                (type, object, types.MethodType, types.FunctionType, types.ModuleType),
+            )
+        )
+        return result
 
     def cleanup_exception_pre(self, ex):
         """
@@ -250,8 +268,17 @@ class Interposer(object):
         """
         pass
 
+    def _log(self, category: str, subcategory: str, msg: str) -> None:
+        """
+        Common funnel for interposer logs.
+        """
+        self.logger.log(
+            self.loglevels[category][subcategory], (self.logprefix or " ") + msg
+        )
+
     def _playback(self, params: dict) -> object:
-        """playback a previous recording
+        """
+        Playback a previous recording.
 
         Args:
             params:  A dict containing: { method: <method called>, args: [args], kwargs: {kwargs} }
@@ -308,18 +335,20 @@ class Interposer(object):
             exception = recorded[1]
 
         if exception is None:
-            self.logger.log(
-                self.loglevels["result"]["playback"],
-                f"TAPE: Playing back RESULT for {result_key} call #{index} "
+            self._log(
+                "result",
+                "playback",
+                f"playing back RESULT for {result_key} call #{index} "
                 f"for params {new_params} hash={prefix} "
                 f"type={(result.__class__.__name__ if result is not None else 'None')}: "
                 f"{pformat(result)}",
             )
             return self.cleanup_result_post(result)
         else:
-            self.logger.log(
-                self.loglevels["except"]["playback"],
-                f"TAPE: Playing back EXCEPTION for {result_key} call #{index} "
+            self._log(
+                "except",
+                "playback",
+                f"playing back EXCEPTION for {result_key} call #{index} "
                 f"for params {new_params} hash={prefix}: {str(exception)}",
             )
             raise self.cleanup_exception_post(exception)
@@ -356,17 +385,19 @@ class Interposer(object):
             self.call_order[params["channel"]]["calls"] = [params]
 
         if exception is None:
-            self.logger.log(
-                self.loglevels["result"]["recorded"],
-                f"TAPE: Recording RESULT {result_key} call #{(len(result_list) - 1)} "
+            self._log(
+                "result",
+                "recorded",
+                f"recording RESULT {result_key} call #{(len(result_list) - 1)} "
                 f"for params {params} hash={prefix} "
                 f"type={(result.__class__.__name__ if result is not None else 'None')}: "
                 f"{pformat(result)}",
             )
         else:
-            self.logger.log(
-                self.loglevels["except"]["recorded"],
-                f"TAPE: Recording EXCEPTION {result_key} call #{(len(result_list) - 1)} "
+            self._log(
+                "except",
+                "recorded",
+                f"recording EXCEPTION {result_key} call #{(len(result_list) - 1)} "
                 f"for params {params} hash={prefix}: {exception}",
             )
         self.tape[result_key] = result_list
@@ -386,81 +417,97 @@ class ScopedInterposer(Interposer, AbstractContextManager):
         self.close()
 
 
-class _InterposerClassWrapper(ObjectProxy):
+class _InterposerWrapper(CallableObjectProxy):
     """
-    Use Interposer.wrap() to wrap something for recording or playback.
-
     This class is an implementation detail of Interposer.
-
-    This class wraps a class, ensuring that every method called on the wrapped
-    class gets transparently proxied by the _InterposerMethodWrapper allowing
-    that method call to be optionally recorded.  It will also wrap any
-    attributes of the target class with this class, so that any methods on
-    those embedded objects will also be wrapped.
     """
 
-    def __init__(self, recorder: Interposer, clazz, channel="default"):
+    def __init__(self, interposer: Interposer, clazz, channel="default"):
+        """
+        Use of self._self_... is per wrapt requirements.
+        """
         super().__init__(clazz)
         self._self_channel = channel
-        self._self_recorder = recorder
+        self._self_interposer = interposer
 
     def __call__(self, *args, **kwargs):
-        attr = self.__wrapped__(*args, **kwargs)
-        return _InterposerClassWrapper(
-            self._self_recorder, attr, channel=self._self_channel
-        )
+        """
+        Handle a call on the wrapped item.
+
+        This is where we inject the pre- and post- handlers.
+
+        Calls on class definitions (initialization).
+        Calls on methods and functions get recorded.
+        """
+        if isinstance(self.__wrapped__, (type, types.MethodType, types.FunctionType)):
+            params = {
+                "method": self.__wrapped__.__name__,
+                "args": args,
+                "kwargs": kwargs,
+            }
+            params[
+                "channel" if self._self_interposer.version >= 3 else "context"
+            ] = self._self_channel
+            if self._self_interposer.mode == Mode.Playback:
+                self._self_interposer.clear_for_execution(params)
+                result = self._self_interposer._playback(params)
+                if isinstance(self.__wrapped__, type):
+                    # instantiating an object from a class definition requires
+                    # us to wrap the result so that we can capture the rest of
+                    # the object's usage
+                    result = self._self_interposer.wrap(
+                        result, channel=self._self_channel
+                    )
+                return result
+            else:
+                try:
+                    self._self_interposer.clear_for_execution(params)
+                    self._log(
+                        "call", f"calling {self.__wrapped__} and recording result"
+                    )
+                    result = self._self_interposer.cleanup_result_pre(
+                        params, super().__call__(*args, **kwargs)
+                    )
+                    params = self._self_interposer.cleanup_parameters_pre(params)
+                    self._self_interposer._record(params, result)
+                    if isinstance(self.__wrapped__, type):
+                        # instantiating an object from a class definition requires
+                        # us to wrap the result so that we can capture the rest of
+                        # the object's usage
+                        result = self._self_interposer.wrap(
+                            result, channel=self._self_channel
+                        )
+                    return result
+                except Exception as ex:
+                    params = self._self_interposer.cleanup_parameters_pre(params)
+                    ex = self._self_interposer.cleanup_exception_pre(ex)
+                    self._self_interposer._record(params, None, exception=ex)
+                    raise ex
+        else:
+            # not a class definition, method, or function
+            # simply return the result of the call
+            self._log("call", f"calling {self.__wrapped__} and ignoring result")
+            return super().__call__(*args, **kwargs)
 
     def __getattr__(self, name):
+        """
+        Handle duck typing on the wrapped item.
+
+        If the attribute is a function, method, class definition, wrap it so
+        that when it is called, we execute the code above to capture it if
+        necessary.
+        """
         attr = super().__getattr__(name)
-        if isinstance(attr, (types.FunctionType, types.MethodType)):
-            # this is pretty noisy
-            # self._self_recorder.logger.debug(f"TAPE: wrapping callable {self.__wrapped__}.{name}")
-            # Wrap the methods that get called
-            attr = _InterposerMethodWrapper(
-                self._self_recorder, attr, channel=self._self_channel
-            )
-        elif name == "__wrapped__":
-            # Prevent infinite loops
+        try:
+            attr = self._self_interposer.wrap(attr, channel=self._self_channel)
+            # logs the positive case
+        except WrappingError:
+            self._log("wrap", f"NOT wrapping {self.__class__}.{name}")
             pass
-        else:
-            # this is pretty noisy
-            # self._self_recorder.logger.debug(f"TAPE: wrapping attribute {self.__wrapped__}.{name}")
-            attr = _InterposerClassWrapper(
-                self._self_recorder, attr, channel=self._self_channel
-            )
         return attr
 
-
-class _InterposerMethodWrapper(ObjectProxy):
-    """
-    This class wraps a method and optionally can record all parameters
-    and the result to the Interposer.
-    """
-
-    def __init__(self, recorder: Interposer, method, channel="default"):
-        super().__init__(method)
-        self._self_channel = channel
-        self._self_recorder = recorder
-
-    def __call__(self, *args, **kwargs):
-        params = {"method": self.__wrapped__.__name__, "args": args, "kwargs": kwargs}
-        params[
-            "channel" if self._self_recorder.version >= 3 else "context"
-        ] = self._self_channel
-        if self._self_recorder.mode == Mode.Playback:
-            self._self_recorder.clear_for_execution(params)
-            return self._self_recorder._playback(params)
-        else:
-            try:
-                self._self_recorder.clear_for_execution(params)
-                result = self._self_recorder.cleanup_result_pre(
-                    params, self.__wrapped__(*args, **kwargs)
-                )
-                params = self._self_recorder.cleanup_parameters_pre(params)
-                self._self_recorder._record(params, result)
-                return result
-            except Exception as ex:
-                params = self._self_recorder.cleanup_parameters_pre(params)
-                ex = self._self_recorder.cleanup_exception_pre(ex)
-                self._self_recorder._record(params, None, exception=ex)
-                raise ex
+    def _log(self, subcategory: str, msg: str) -> None:
+        """
+        Common funnel for wrap logs.
+        """
+        self._self_interposer._log("wrappr", subcategory, msg)

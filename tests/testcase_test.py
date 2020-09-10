@@ -66,7 +66,7 @@ class TestInterposedTestCase(InterposedTestCase):
         uut = Weather()
         with self.assertRaises(Exception):
             # noaa_sdk raises Exception directly, unfortunately...
-            uut.print_forecast("11365", "US", False, 3)
+            uut.print_forecast("01886", "US", False, 3)
 
     def test_testcase_record_playback(self):
         """
@@ -80,7 +80,7 @@ class TestInterposedTestCase(InterposedTestCase):
         # are pretty complex and mocking those responses would be tedious.
         with patch("interposer._testing.weather.noaa", new=self.interposer.wrap(noaa)):
             uut = Weather()
-            uut.print_forecast("11365", "US", False, 3)
+            uut.print_forecast("01886", "US", False, 3)
 
         """
         This next part is really just to prove that InterposedTestCase is actually
@@ -110,6 +110,6 @@ class TestInterposedTestCase(InterposedTestCase):
                 "interposer._testing.weather.noaa", new=self.interposer.wrap(noaa)
             ):
                 uut = Weather()
-                uut.print_forecast("11365", "US", False, 3)
+                uut.print_forecast("01886", "US", False, 3)
 
         mock_requests.assert_not_called()

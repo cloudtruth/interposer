@@ -19,4 +19,4 @@ class TestWeather(InterposedTestCase):
         """
         with patch("interposer._testing.weather.noaa", new=self.interposer.wrap(noaa)):
             uut = Weather()
-            uut.print_forecast("11365", "US", False, 3)
+            uut.print_forecast("01886", "US", False, 3)

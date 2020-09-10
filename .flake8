@@ -1,5 +1,5 @@
 [flake8]
-ignore = SFS301
+ignore = W503,SFS301
 exclude = .git,__pycache__
 max-complexity = 20
 max-line-length = 120

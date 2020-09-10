@@ -16,13 +16,14 @@ from interposer import Interposer
 from interposer import Mode
 from interposer import PlaybackError
 from interposer import ScopedInterposer
+from interposer.interposer import _InterposerWrapper
 
 
 # for testing a standalone method
 rv = True
 
 
-def standalone_method():
+def standalone_function():
     return rv
 
 
@@ -82,19 +83,19 @@ class InterposerTest(unittest.TestCase):
     def test_good_function_wrapping(self):
         """
         This proves the recording and playback are working properly for a
-        bare function.  standalone_method returns the global rv if it is
+        bare function.  standalone_function returns the global rv if it is
         not being played back...
         """
         global rv
         with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
-            wm = uut.wrap(standalone_method)
+            wm = uut.wrap(standalone_function)
             rv = True
             self.assertEqual(wm(), True)
             rv = False
             self.assertEqual(wm(), False)
 
         with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
-            wm = uut.wrap(standalone_method)
+            wm = uut.wrap(standalone_function)
             # rv is still False, but since we're playing back...
             self.assertEqual(wm(), True)
             self.assertEqual(wm(), False)
@@ -117,6 +118,35 @@ class InterposerTest(unittest.TestCase):
             assert wt.say_hi(second=MyEnum.FOO) == "hello True MyEnum.FOO"
             with self.assertRaises(PlaybackError):
                 wt.say_hi(second="foobar")  # never called during recording
+
+    def test_wrappable(self):
+        """
+        Test the logic that determines what is wrappable.
+        """
+        with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
+            # modules
+            assert uut.wrappable(logging)
+            # class definitions
+            assert uut.wrappable(Path)
+            # class instances
+            assert uut.wrappable(self.datadir)
+            # bare functions
+            assert uut.wrappable(standalone_function)
+
+            # instantiating a wrapped class definition returns a wrapped instance
+            assert isinstance(uut.wrap(Path()), _InterposerWrapper)
+
+            # primitives
+            assert not uut.wrappable(None)
+            assert not uut.wrappable(True)
+            assert not uut.wrappable(42)
+            assert not uut.wrappable(42.0)
+            assert not uut.wrappable(complex(42))
+            assert not uut.wrappable(list())
+            assert not uut.wrappable(tuple())
+            assert not uut.wrappable(set())
+            assert not uut.wrappable(dict())
+            assert not uut.wrappable(bytearray(1))
 
     def test_good_class_wrapping(self):
         """
@@ -189,21 +219,18 @@ class InterposerTest(unittest.TestCase):
             t.result = "one:two"
             self.assertEqual(wt.say_hi(), "hello one:two")
 
-        pb1 = Interposer(self.datadir / "recording", Mode.Playback)
-        pb1.open()
-        pb1.open()  # idempotent
+        pb = Interposer(self.datadir / "recording", Mode.Playback)
+        pb.open()
+        pb.open()  # idempotent
         t1 = SomeClass(None)
-        wt1 = pb1.wrap(t1, channel="nsone")
-        pb2 = Interposer(self.datadir / "recording", Mode.Playback)
-        pb2.open()
+        wt1 = pb.wrap(t1, channel="nsone")
         t2 = SomeClass(None)
-        wt2 = pb2.wrap(t2, channel="nstwo")
+        wt2 = pb.wrap(t2, channel="nstwo")
         self.assertEqual(wt1.say_hi(), "hello one:one")  # 1st call in channel nsone
         self.assertEqual(wt2.say_hi(), "hello second:one")  # 1st call in channel nstwo
         self.assertEqual(wt1.say_hi(), "hello one:two")  # 2nd call in channel nsone
-        pb2.close()
-        pb2.close()  # idempotent
-        pb1.close()
+        pb.close()
+        pb.close()  # idempotent
 
     def test_playback_out_of_order(self):
         """
