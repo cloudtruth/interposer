@@ -196,7 +196,15 @@ class Interposer(object):
             )
             and isinstance(
                 thing,
-                (type, object, types.MethodType, types.FunctionType, types.ModuleType),
+                (
+                    type,
+                    object,
+                    types.MethodType,
+                    types.BuiltinMethodType,
+                    types.FunctionType,
+                    types.BuiltinFunctionType,
+                    types.ModuleType,
+                ),
             )
         )
         return result
@@ -292,7 +300,7 @@ class Interposer(object):
         ).hexdigest()
         result_key = f"{prefix}.results"
 
-        # Check the call order and issue a warning if warranted
+        # Check the call order - if not an exact match something changed.
         if self.call_order:
             channel = new_params.get("channel")
             if channel:
@@ -301,8 +309,9 @@ class Interposer(object):
                 if len(calls) <= index:
                     raise PlaybackError("Not enough calls recorded to satisfy.")
                 if new_params != calls[index]:
-                    msg = f"Call {new_params} played back as call in a different order than recorded. "
-                    msg += f"Call at index {index}: {self.call_order[channel]['calls'][index]}"
+                    msg = f"Call #{index} is different than what was recorded. "
+                    msg += "Please re-record and/or resolve non-idempotent (random) behavior. "
+                    msg += f"This call: {params}; Recorded call: {calls[index]}"
                     raise PlaybackError(msg)
 
                 self.call_order[channel]["call_index"] = index + 1
@@ -439,7 +448,19 @@ class _InterposerWrapper(CallableObjectProxy):
         Calls on class definitions (initialization).
         Calls on methods and functions get recorded.
         """
-        if isinstance(self.__wrapped__, (type, types.MethodType, types.FunctionType)):
+        if isinstance(
+            self.__wrapped__,
+            (
+                type,
+                types.MethodType,
+                types.BuiltinMethodType,
+                types.FunctionType,
+                types.BuiltinFunctionType,
+            ),
+        ):
+            # TODO: when we consolidate, keep track of the call chain so we have proper scope
+            #       so two delete methods in different classes with the same args will not get
+            #       confused into thinking the call order is correct
             params = {
                 "method": self.__wrapped__.__name__,
                 "args": args,

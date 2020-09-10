@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support for wrapping modules.
 - Added support for wrapping object instantiations from class definitions.
+- Added support for builtins.
 - Added logging control for wrapping and calling.
 - Consolidated determination of whether something is `wrappable`.
 - Fixed wrapping of property results.

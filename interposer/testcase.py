@@ -32,6 +32,9 @@ class InterposedTestCase(TestCase):
         """
         super().setUp()
 
+        if not issubclass(cls, Interposer):
+            raise AttributeError("cls must be an Interposer")
+
         assert recordings, "recordings location must be specified"
         assert isinstance(
             recordings, Path

@@ -27,6 +27,10 @@ def standalone_function():
     return rv
 
 
+def builtin_function():
+    return datetime.utcnow().isoformat()
+
+
 class MyEnum(Enum):
     FOO = 1
 
@@ -86,6 +90,7 @@ class InterposerTest(unittest.TestCase):
         bare function.  standalone_function returns the global rv if it is
         not being played back...
         """
+        stamp = None
         global rv
         with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
             wm = uut.wrap(standalone_function)
@@ -94,11 +99,20 @@ class InterposerTest(unittest.TestCase):
             rv = False
             self.assertEqual(wm(), False)
 
+            # builtins
+            wm = uut.wrap(builtin_function)
+            stamp = wm()
+
         with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
             wm = uut.wrap(standalone_function)
             # rv is still False, but since we're playing back...
             self.assertEqual(wm(), True)
             self.assertEqual(wm(), False)
+
+            # builtins
+            wm = uut.wrap(builtin_function)
+            chk = wm()
+            assert chk == stamp
 
     def test_ok_additional_types(self):
         """
