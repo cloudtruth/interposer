@@ -9,6 +9,7 @@ import shelve
 import types
 
 from contextlib import AbstractContextManager
+from copy import deepcopy
 from datetime import datetime
 from enum import auto
 from enum import Enum
@@ -311,7 +312,7 @@ class Interposer(object):
                 if new_params != calls[index]:
                     msg = f"Call #{index} is different than what was recorded. "
                     msg += "Please re-record and/or resolve non-idempotent (random) behavior. "
-                    msg += f"This call: {params}; Recorded call: {calls[index]}"
+                    msg += f"This call: {new_params}; Recorded call: {calls[index]}"
                     raise PlaybackError(msg)
 
                 self.call_order[channel]["call_index"] = index + 1
@@ -388,10 +389,10 @@ class Interposer(object):
 
         # record the call in the call_order list
         if params["channel"] in self.call_order:
-            self.call_order[params["channel"]]["calls"].append(params)
+            self.call_order[params["channel"]]["calls"].append(deepcopy(params))
         else:
             self.call_order[params["channel"]] = {}
-            self.call_order[params["channel"]]["calls"] = [params]
+            self.call_order[params["channel"]]["calls"] = [deepcopy(params)]
 
         if exception is None:
             self._log(

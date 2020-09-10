@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidated determination of whether something is `wrappable`.
 - Fixed wrapping of property results.
 - Fixed unnecessary wrapping of python primitives like `str`.
+- Fixed call order parameter storage could be modified after call.
 
 ## [0.6.1] - 2019-09-04
 
