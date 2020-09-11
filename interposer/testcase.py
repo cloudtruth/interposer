@@ -27,8 +27,8 @@ class InterposedTestCase(TestCase):
         Prepare for recording or playback based on the test name.
 
         Arguments:
-          cls (Interposer): allows subclassing Interposer
           recordings (Path): the location of the recordings
+          cls (Interposer): allows subclassing Interposer
         """
         super().setUp()
 

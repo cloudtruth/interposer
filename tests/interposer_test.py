@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2019 Tuono, Inc.
+# Copyright (C) 2019 - 2020 Tuono, Inc.
 # All Rights Reserved
 #
 import logging
 import shutil
 import tempfile
 import unittest
+import uuid
 
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Dict
 
 from interposer import Interposer
 from interposer import Mode
@@ -43,12 +45,13 @@ class SomeClass(object):
 
     throw_exception = True
 
-    def __init__(self, result: object):
+    def __init__(self, result: object, secret: str = None):
         """
         Store a result for say_hi.  If this derives from Exception then
         it will raise when called.
         """
         self.result = result
+        self.auth = {"secret": secret}
 
     def say_hi(self, greeting: str = "hello", second: object = None) -> str:
         """
@@ -71,6 +74,34 @@ class SomeClass(object):
         In this case the return value is a class so that has to be wrapped.
         """
         return SomeClass(self.result)
+
+
+class SomeClassSecretRemoverInterposer(Interposer):
+    """
+    Eliminates the secret from being in the recording.
+
+    This is done two ways:
+
+    1. By removing it from the params used to hash a unique call.
+    2. By removing it from any result.
+    """
+
+    def cleanup_parameters_pre(self, params) -> Dict:
+        """
+        Remove the secret from the parameters used to initialize it
+        in the recording.
+        """
+        if "secret" in params["kwargs"]:
+            params["kwargs"]["secret"] = "REDACTED_SECRET"  # nosec
+        return params
+
+    def cleanup_result_pre(self, params, result) -> object:
+        """
+        Remove the secret from the initialized class in the recording.
+        """
+        if "secret" in params["kwargs"]:
+            result.__dict__["auth"]["secret"] = "REDACTED_SECRET"  # nosec
+        return result
 
 
 class InterposerTest(unittest.TestCase):
@@ -298,3 +329,27 @@ class InterposerTest(unittest.TestCase):
             with self.assertRaises(PlaybackError):
                 # was never called a second time
                 wt.say_hi()
+
+    def test_recording_contains_no_secret(self):
+        """
+        Check that if we properly implement cleanup_parameters_pre, any secret
+        in the parameters is not recorded at all.  When we wrap a class definition
+        we end up storing the parameters passed to it, which may include a secret,
+        so a custom interposer can remove that secret from the recording.
+        """
+        uut = SomeClassSecretRemoverInterposer(
+            self.datadir / "recording", Mode.Recording
+        )
+        uut.open()
+        secret = str(uuid.uuid4())
+        wt = uut.wrap(SomeClass)  # wraps the class definition
+        t = wt(True, secret=secret)
+        self.assertEqual(t.say_hi(), "hello True")
+        uut.close()
+
+        with (self.datadir / "recording").open("rb") as fp:
+            data = fp.read()
+            assert (
+                "REDACTED_SECRET".encode() in data
+            ), "did not find redacted secret in data file"
+            assert secret.encode() not in data, "found original secret in data file"
