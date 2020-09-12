@@ -10,6 +10,7 @@ __all__ = [
     "InterposerError",
     "Mode",
     "PlaybackError",
+    "ResultHandlingFlag",
     "ScopedInterposer",
     "WrappingError",
 ]
@@ -23,6 +24,7 @@ from .interposer import (
     Interposer,
     InterposerEncoder,
     Mode,
+    ResultHandlingFlag,
     ScopedInterposer,
 )
 from .testcase import InterposedTestCase

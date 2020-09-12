@@ -9,10 +9,12 @@ import shelve
 import types
 
 from contextlib import AbstractContextManager
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from enum import auto
 from enum import Enum
+from enum import Flag
 from hashlib import sha1
 from pathlib import Path
 from pprint import pformat
@@ -34,6 +36,19 @@ class Mode(Enum):
 
     Playback = auto()
     Recording = auto()
+
+
+class ResultHandlingFlag(Flag):
+    """
+    Specifies result handling behavior.
+    """
+
+    # causes the result to be recorded
+    RECORD = auto()
+
+    # causes the cleaned result to be returned to the caller
+    # normally the original result is returned to the caller
+    REPLACE = auto()
 
 
 class InterposerEncoder(json.JSONEncoder):
@@ -210,35 +225,65 @@ class Interposer(object):
         )
         return result
 
-    def cleanup_exception_pre(self, ex):
+    @contextmanager
+    def cleanup_exception_pre(self, params: Dict, ex: Exception) -> None:
         """
         When an exception is going to be recorded, this intercept allows the
         exception to be changed.  This is necessary for any exception that
-        cannot be pickled.
+        cannot be pickled or contains sensitive information.
 
-        Common ways to deal with pickling errors here are:
+        This is a context manager so that the content going into the recording
+        can be different than what is returned.
+
+        Common ways to deal with pickling errors are:
           - Set one of the properties to None
           - Return a doppleganger class (looks like, smells like, but does not
             derive from the original).
-        """
-        return ex
 
-    def cleanup_exception_post(self, ex):
+        Arguments:
+          params: the original call parameters
+          ex: the original exception
+
+        Yields:
+          - the (possibly) modified exception
+        """
+        yield ex
+
+    def cleanup_exception_post(self, params: Dict, ex: Exception) -> Exception:
         """
         Modify an exception during playback before it is thrown.
+
+        Returns:
+          the object to be raised as the result
         """
         return ex
 
-    def cleanup_parameters_pre(self, params):
+    def cleanup_parameters_pre(self, params: Dict) -> Dict:
         """
-        Allows the data in the parameters (this uniquely identifies a request)
-        to be modified.  This is useful in wiping out any credentials or other
-        sensitive information.  When replaying in tests, if you set these bits
-        to the same value, the recorded playback will match.
+        Allows the data used to uniquely identify the call to be scrubbed
+        of sensitive content.  A common technique is to replace a secret
+        stored in the params with a well-known string, and then use that
+        well-known string at playback time as the secret that is passed
+        in.
+
+        Note that the args and kwargs in params are the actual call
+        args and kwargs.  If you need to make changes you should return
+        a copy with the modification so you are not modifying anything
+        in the caller.
+
+        For example if a class takes a password, during recording you
+        would pass in the actual password and modify it here to be "PASSWORD".
+        Then during playback if you pass in the password "PASSWORD", the
+        call signature will match what was recorded.
+
+        Note that the entire params structure is recorded in a call log in
+        the recording database - not just a hash of the params.  FIXME: we
+        could instead encode the ordinal call number into the params and
+        hash it, and rely on the log output to diagnose misalignment.
         """
         return params
 
-    def cleanup_parameters_post(self, params):
+    def cleanup_parameters_post(self, params: Dict) -> Dict:
         """
         Modify parameters during playback before they are hashed to locate
         a recording.  This usually does the same thing as
@@ -246,28 +291,63 @@ class Interposer(object):
         """
         return params
 
-    def cleanup_result_pre(self, params, result):
+    @contextmanager
+    def cleanup_result_pre(
+        self, params: Dict, result: object, flags: ResultHandlingFlag
+    ) -> None:
         """
-        Some return values cannot be pickled.  This interceptor allows you to
-        rewrite the result so that it can be.  Sometimes this means removing
-        a property (setting it to None), sometimes it means replacing the
-        result with something else entirely (a doppleganger with the same
-        methods and properties as the original, but isn't derived from it).
+        This cleanup allows you to modify the result before it is written.
 
-        Common ways to deal with pickling errors here are:
-          - Set one of the properties to None
-          - Return a doppleganger class (looks like, smells like, but does not
-            derive from the original).
+        This is implemented as a context manager so that the content that gets
+        recorded can be different than the original return value.
+        There are four patterns generally found when handling results:
+
+        1. The result contains no sensitive data and can be pickled.
+        2. The result cannot be pickled.
+        3. The result contains sensitive data that should not be recorded.
+        4. The result is a generator.
+
+        The most common pickle-incompatible result is a local class
+        definition that gets returned.  Pickle cannot reconstitute such
+        a class because it is not in the global namespace.  In this case
+        you can provide a stand-in that behaves the same way as the original.
+        This stand-in gets recorded and used during playback, however the
+        original result continues to be used during the remainder of the
+        recording.  This means it is possible that recording will succeed
+        but playback will fail if the stand-in is not accurate in behavior.
+
+        For results with sensitive data, you should redact that data
+        before yielding then replace it before returning.  The recording
+        will contain, and playback will have a redacted object, but the
+        remainder of the recording run will use the original result with the
+        secret intact.
+
+        For generator results, the process of recording drains the generator,
+        so it is recommended that you convert the generator to a suitable
+        container and drain the contents, and then tell the context to replace
+        the original result with the cleaned-up result.
+
+        FIXME:
+          The params are given to help identify the call, but we should
+          be passing in the complete context of the call.
+
+        Yields:
+          a tuple of:
+            - the result to be recorded and used during subsequent playback
+            - result handling flags
         """
-        return result
+        yield result, flags
 
-    def cleanup_result_post(self, result):
+    def cleanup_result_post(self, result: object) -> object:
         """
         Modify the return value during playback before it is returned.
+
+        Returns:
+          the object to be returned as the result
         """
         return result
 
-    def clear_for_execution(self, params) -> None:
+    def clear_for_execution(self, params: Dict) -> None:
         """
         Called before any method is actually executed.  This can be used to
         implement a mechanism that ensures only certain methods are called.
@@ -295,44 +375,41 @@ class Interposer(object):
         Returns:
             Whatever object was stored
         """
-        new_params = self.cleanup_parameters_post(params)
         prefix = sha1(  # nosec
-            json.dumps(new_params, sort_keys=True, cls=self.encoder).encode()
+            json.dumps(params, sort_keys=True, cls=self.encoder).encode()
         ).hexdigest()
         result_key = f"{prefix}.results"
 
         # Check the call order - if not an exact match something changed.
         if self.call_order:
-            channel = new_params.get("channel")
+            channel = params.get("channel")
             if channel:
                 index = self.call_order[channel].get("call_index", 0)
                 calls = self.call_order[channel]["calls"]
                 if len(calls) <= index:
                     raise PlaybackError("Not enough calls recorded to satisfy.")
-                if new_params != calls[index]:
+                if params != calls[index]:
                     msg = f"Call #{index} is different than what was recorded. "
                     msg += "Please re-record and/or resolve non-idempotent (random) behavior. "
-                    msg += f"This call: {new_params}; Recorded call: {calls[index]}"
+                    msg += f"This call: {params}; Recorded call: {calls[index]}"
                     raise PlaybackError(msg)
 
                 self.call_order[channel]["call_index"] = index + 1
 
             # record the call in the playback_call_order list
-            if new_params["channel"] in self.playback_call_order:
-                self.playback_call_order[new_params["channel"]]["calls"].append(
-                    new_params
-                )
+            if params["channel"] in self.playback_call_order:
+                self.playback_call_order[params["channel"]]["calls"].append(params)
             else:
-                self.playback_call_order[new_params["channel"]] = {}
-                self.playback_call_order[new_params["channel"]]["calls"] = [new_params]
+                self.playback_call_order[params["channel"]] = {}
+                self.playback_call_order[params["channel"]]["calls"] = [params]
 
         located = self.tape.get(result_key)
         if not located:
-            raise PlaybackError(f"No calls for params {new_params} were ever recorded.")
+            raise PlaybackError(f"No calls for params {params} were ever recorded.")
         index = self.playback_index.get(result_key, 0)
         if len(located) <= index:
             raise PlaybackError(
-                f"Call #{index} for params {new_params} was never recorded."
+                f"Call #{index} for params {params} was never recorded."
             )
         recorded = located[index]
         self.playback_index[result_key] = index + 1
@@ -349,7 +426,7 @@ class Interposer(object):
                 "result",
                 "playback",
                 f"playing back RESULT for {result_key} call #{index} "
-                f"for params {new_params} hash={prefix} "
+                f"for params {params} hash={prefix} "
                 f"type={(result.__class__.__name__ if result is not None else 'None')}: "
                 f"{pformat(result)}",
             )
@@ -359,9 +436,9 @@ class Interposer(object):
                 "except",
                 "playback",
                 f"playing back EXCEPTION for {result_key} call #{index} "
-                f"for params {new_params} hash={prefix}: {str(exception)}",
+                f"for params {params} hash={prefix}: {str(exception)}",
             )
-            raise self.cleanup_exception_post(exception)
+            raise self.cleanup_exception_post(params, exception)
 
     def _record(self, params: dict, result: object, exception: object = None):
         """
@@ -472,7 +549,9 @@ class _InterposerWrapper(CallableObjectProxy):
             ] = self._self_channel
             if self._self_interposer.mode == Mode.Playback:
                 self._self_interposer.clear_for_execution(params)
-                result = self._self_interposer._playback(params)
+                result = self._self_interposer._playback(
+                    self._self_interposer.cleanup_parameters_post(params)
+                )
                 if isinstance(self.__wrapped__, type):
                     # instantiating an object from a class definition requires
                     # us to wrap the result so that we can capture the rest of
@@ -487,11 +566,24 @@ class _InterposerWrapper(CallableObjectProxy):
                     self._log(
                         "call", f"calling {self.__wrapped__} and recording result"
                     )
-                    result = self._self_interposer.cleanup_result_pre(
-                        params, super().__call__(*args, **kwargs)
-                    )
-                    params = self._self_interposer.cleanup_parameters_pre(params)
-                    self._self_interposer._record(params, result)
+                    result = super().__call__(*args, **kwargs)
+                    with self._self_interposer.cleanup_result_pre(
+                        params, result, ResultHandlingFlag.RECORD
+                    ) as (scrubbed_result, flags):
+                        if flags & ResultHandlingFlag.RECORD:
+                            self._self_interposer._record(
+                                self._self_interposer.cleanup_parameters_pre(params),
+                                scrubbed_result,
+                            )
+                        if flags & ResultHandlingFlag.REPLACE:
+                            self._log(
+                                "call",
+                                (
+                                    f"cleanup {self._self_interposer.cleanup_parameters_pre} is replacing the "
+                                    f"original result of type {type(result)} with type {type(scrubbed_result)}"
+                                ),
+                            )
+                            result = scrubbed_result
                     if isinstance(self.__wrapped__, type):
                         # instantiating an object from a class definition requires
                         # us to wrap the result so that we can capture the rest of
@@ -501,9 +593,14 @@ class _InterposerWrapper(CallableObjectProxy):
                         )
                     return result
                 except Exception as ex:
-                    params = self._self_interposer.cleanup_parameters_pre(params)
-                    ex = self._self_interposer.cleanup_exception_pre(ex)
-                    self._self_interposer._record(params, None, exception=ex)
+                    with self._self_interposer.cleanup_exception_pre(
+                        params, ex
+                    ) as scrubbed_ex:
+                        self._self_interposer._record(
+                            self._self_interposer.cleanup_parameters_pre(params),
+                            None,
+                            exception=scrubbed_ex,
+                        )
                     raise ex
         else:
             # not a class definition, method, or function

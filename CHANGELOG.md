@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- Signatures of most of the cleanup methods have changed.
 - `wrap` no longer requires (or accepts) `as_method` for wrapping
   class instantiations.
 - `wrap` raises WrappingError if something is not wrappable.
@@ -21,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added support for wrapping object instantiations from class definitions.
 - Added support for builtins.
 - Added logging control for wrapping and calling.
+- Added support for conditionally replacing original return value with cleaned one.
+- Added support for conditionally not recording a call.
 - Consolidated determination of whether something is `wrappable`.
 - Fixed wrapping of property results.
-- Fixed unnecessary wrapping of python primitives like `str`.
+- Fixed incorrect wrapping of python primitives like `str`.
 - Fixed call order parameter storage could be modified after call.
 
 ## [0.6.1] - 2019-09-04
