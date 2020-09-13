@@ -6,6 +6,7 @@
 import logging
 import shutil
 import tempfile
+import time
 import types
 import unittest
 import uuid
@@ -193,13 +194,12 @@ class InterposerTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(str(self.datadir))
 
-    def test_good_function_wrapping(self):
+    def test_function_wrapping(self):
         """
         This proves the recording and playback are working properly for a
         bare function.  standalone_function returns the global rv if it is
         not being played back...
         """
-        stamp = None
         global rv
         with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
             wm = uut.wrap(standalone_function)
@@ -208,20 +208,29 @@ class InterposerTest(unittest.TestCase):
             rv = False
             self.assertEqual(wm(), False)
 
-            # builtins
-            wm = uut.wrap(builtin_function)
-            stamp = wm()
-
         with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
             wm = uut.wrap(standalone_function)
             # rv is still False, but since we're playing back...
             self.assertEqual(wm(), True)
             self.assertEqual(wm(), False)
 
-            # builtins
+    def test_builtin_functions(self):
+        """
+        Proves builtin functions like datetime.utcnow are captured.  They
+        are different "types" than a standard function.
+        """
+        stamp = None
+
+        with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
+            wm = uut.wrap(builtin_function)
+            stamp = wm()
+
+        time.sleep(0.1)
+
+        with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
             wm = uut.wrap(builtin_function)
             chk = wm()
-            assert chk == stamp
+            assert chk == stamp  # no time passed
 
     def test_ok_additional_types(self):
         """
@@ -269,13 +278,20 @@ class InterposerTest(unittest.TestCase):
         """
         with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
             # modules
+            assert isinstance(logging, types.ModuleType)
             assert uut.wrappable(logging)
             # class definitions
+            assert isinstance(Path, type)
             assert uut.wrappable(Path)
             # class instances
+            assert isinstance(self.datadir, object)
             assert uut.wrappable(self.datadir)
             # bare functions
+            assert isinstance(standalone_function, types.FunctionType)
             assert uut.wrappable(standalone_function)
+            # builtin functions
+            assert isinstance(datetime.utcnow, types.BuiltinFunctionType)
+            assert uut.wrappable(datetime.utcnow)
 
             # instantiating a wrapped class definition returns a wrapped instance
             assert isinstance(uut.wrap(Path()), _InterposerWrapper)
