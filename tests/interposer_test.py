@@ -35,8 +35,8 @@ def standalone_function():
     return rv
 
 
-def builtin_function():
-    return datetime.utcnow().isoformat()
+def builtin_function() -> int:
+    return datetime.now().timestamp()
 
 
 class MyEnum(Enum):
@@ -216,7 +216,7 @@ class InterposerTest(unittest.TestCase):
 
     def test_builtin_functions(self):
         """
-        Proves builtin functions like datetime.utcnow are captured.  They
+        Proves builtin functions like datetime.now are captured.  They
         are different "types" than a standard function.
         """
         stamp = None
@@ -230,14 +230,14 @@ class InterposerTest(unittest.TestCase):
         with ScopedInterposer(self.datadir / "recording", Mode.Playback) as uut:
             wm = uut.wrap(builtin_function)
             chk = wm()
-            assert chk == stamp  # no time passed
+            assert chk == stamp  # no time passed when playing back recording
 
     def test_ok_additional_types(self):
         """
         Use datetime and enum in arguments and it is okay, we convert to
         a form that can be json encoded.
         """
-        t = datetime.utcnow()
+        t = datetime.now()
         with ScopedInterposer(self.datadir / "recording", Mode.Recording) as uut:
             # if actually called, say_hi should return True
             wt = uut.wrap(SomeClass(True))
@@ -290,8 +290,8 @@ class InterposerTest(unittest.TestCase):
             assert isinstance(standalone_function, types.FunctionType)
             assert uut.wrappable(standalone_function)
             # builtin functions
-            assert isinstance(datetime.utcnow, types.BuiltinFunctionType)
-            assert uut.wrappable(datetime.utcnow)
+            assert isinstance(datetime.now, types.BuiltinFunctionType)
+            assert uut.wrappable(datetime.now)
 
             # instantiating a wrapped class definition returns a wrapped instance
             assert isinstance(uut.wrap(Path()), _InterposerWrapper)
