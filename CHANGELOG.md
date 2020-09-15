@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This was a major refactoring to allow for custom call handlers.
+
+### Breaking
+
+- Switched from json to pickle based hashing.
+- Separated the record/playback logic from the wrapping logic.
+
+### Changed
+
+- Added RecordedTestCase and @recorded decorators for easier testing.
+- Added the ability to stack call handlers.
+- Eliminated special case code for dealing with primitives.
+
 ## [0.7.0] - 2019-09-10
 
 ### Breaking

@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
-from pathlib import Path
-from unittest.mock import patch
-
+#
+# Copyright (C) 2020 Tuono, Inc.
+# All Rights Reserved
+#
 from noaa_sdk import noaa
 
-from interposer import InterposedTestCase
-from interposer._testing.weather import Weather
+from interposer.example.weather import Weather
+from interposer.recorder import recorded
+from interposer.recorder import RecordedTestCase
 
 
-class TestWeather(InterposedTestCase):
-    def setUp(self) -> None:
-        super().setUp(recordings=Path(__file__).parent / "tapes")
+class TestWeather(RecordedTestCase):
+    """ Example of a record/playback aware test. """
 
+    @recorded(patches={"interposer.example.weather.noaa": noaa})
     def test_print_forecast(self) -> None:
-        """
-        Inserts the interposer between the importing class
-        and the imported class.
-        """
-        with patch("interposer._testing.weather.noaa", new=self.interposer.wrap(noaa)):
-            uut = Weather()
-            uut.print_forecast("01886", "US", False, 3)
+        uut = Weather()
+        assert len(uut.forecast("01001", "US", False, 3)) == 3

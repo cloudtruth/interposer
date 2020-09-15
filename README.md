@@ -5,6 +5,12 @@
 [![codecov](https://codecov.io/gh/tuono/interposer/branch/develop/graph/badge.svg?token=HKUTULQQSA)](https://codecov.io/gh/tuono/interposer)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
+WARNING!!!
+
+WARNING!!! This readme needs to be updated following the major refactoring.
+
+WARNING!!!
+
 Interposer allows you to add selective recording and playback of interactions
 with external services that are too complex to mock effectively.  Interposer
 allows you to:
@@ -28,13 +34,13 @@ named `RECORDING` and if set (and not empty), will generate a recording of the
 interaction with the interposed class(es):
 
 ```
-$ time RECORDING=1 tox example_weather_test.py
+$ time RECORDING=1 make example
 ...
 real    0m8.651s
 user    0m1.911s
 sys     0m0.219s
 
-$ ls tapes
+$ ls -R tapes
 example_weather_test.TestWeather.test_print_forecast.db.gz
 ```
 

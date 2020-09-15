@@ -12,7 +12,7 @@ STAGEDIR := ~/.cache/pypiserver/$(PROJECT)
 all: test
 
 clean:
-	@rm -rf .coverage*
+	@rm -f  .coverage
 	@rm -rf .tox
 	@rm -rf build
 	@rm -f  coverage.xml
@@ -31,7 +31,8 @@ example:
 	# requires "make prerequisites" to have been run once before
 	# to record: time RECORDING=1 make example
 	# to playback: time make example
-	tox tests/example_weather_test.py -- -o log_cli=True -o log_cli_level=DEBUG -s
+	# log level 7 includes logging results
+	tox tests/example_weather_test.py -- -o log_cli=True -o log_cli_level=7 -s
 
 pdb:
 	tox -- --pdb

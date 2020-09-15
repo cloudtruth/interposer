@@ -12,3 +12,4 @@ Pipfile.lock
 build/
 dist/
 pycov/
+tests/tapes/recorder_test/
