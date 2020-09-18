@@ -59,6 +59,11 @@ Given tox has a roughly 2 second startup time, we see the playback is
 essentially as fast as a handcrafted mock, but took way less time to make!
 More details can be found in the Recording and Playback section below.
 
+FIXME: Add info about environment variables used during recording:
+
+RECORDING (turns on)
+TAPEDECKDEBUG (writes out every call context to a pickle file)
+
 ### Auditing
 
 To facilitate auditing and call verification, use Interposer directly in

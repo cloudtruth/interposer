@@ -8,6 +8,7 @@ import os
 import pickle  # nosec
 import shutil
 import tempfile
+import uuid
 
 from datetime import datetime
 from hashlib import sha256
@@ -27,8 +28,8 @@ class SomeClass(object):
         self.logger = logging.getLogger(__name__)
         self.thing = thing
 
-    def amethod(self):
-        pass
+    def amethod(self) -> str:
+        return uuid.uuid4()
 
 
 class TapeDeckTest(TestCase):

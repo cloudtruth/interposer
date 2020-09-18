@@ -284,8 +284,53 @@ class TapeDeck(AbstractContextManager):
         our_meta = context.meta.setdefault(self.LABEL_TAPE, {})
         our_meta[self.LABEL_CHANNEL] = channel
         our_meta[self.LABEL_ORDINAL] = ordinal
-        raw = pickle.dumps(context, protocol=self.PICKLE_PROTOCOL)
 
+        result = None
+        try:
+            # attempt to pickle the call object verbatim - this is a strong
+            # guarantee of uniqueness
+            result = self._hickle(context)
+        except pickle.PicklingError as ex:
+            # since pickling the context with the call verbatim failed
+            # fall back to using a string representation of the call
+            self._logger.log(
+                logging.DEBUG,
+                "pickle",
+                "fail",
+                str(ex) + "; falling back to repr(call)",
+            )
+            save_call = context.call
+            try:
+                sig = repr(context.call)
+                pos = 0
+                while True:
+                    pos = sig.find(" at 0x", pos)
+                    if pos == -1:
+                        break
+                    pos += 6
+                    end = pos
+                    while sig[end].isalnum():
+                        end += 1
+                    sig = sig[:pos] + "0decafcoffee" + sig[end:]
+                    pos += 12
+                context.call = sig
+                # if the next line fails, one of the args or kwargs cannot be pickled
+                # so a CallHandler needs to be inserted before this one to modify it
+                result = self._hickle(context)
+            finally:
+                context.call = save_call
+
+        our_meta[self.LABEL_HASH] = result
+        return result
+
+    def _hickle(self, context: CallContext) -> str:
+        """
+        Hash the call context using pickle.
+
+        Raises:
+            PicklingError if something in the context cannot be pickled.
+        """
+        raw = pickle.dumps(context, protocol=self.PICKLE_PROTOCOL)
         # if TAPEDECKDEBUG is in the environment we dump out the raw pickles so
         # we can use "python3 -m pickletools <file>" to dump out the actual
         # raw pickle content and determine why there was a mismatch; to be used
@@ -293,13 +338,14 @@ class TapeDeck(AbstractContextManager):
         if "TAPEDECKDEBUG" in os.environ:
             calldir = Path(str(self.deck) + "-calls")
             calldir.mkdir(exist_ok=True)
+            our_meta = context.meta[self.LABEL_TAPE]
+            channel = our_meta[self.LABEL_CHANNEL]
+            ordinal = our_meta[self.LABEL_ORDINAL]
             fname = f"{('record' if self.mode == Mode.Recording else 'playback')}-{channel}-{ordinal}.pickle"
             with (calldir / fname).open("wb") as fp:
                 fp.write(raw)
-
         uniq = sha256(raw)
         result = uniq.hexdigest()
-        our_meta[self.LABEL_HASH] = result
         return result
 
     def _log(self, level: int, category: str, action: str, msg: str) -> None:

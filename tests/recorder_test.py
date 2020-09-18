@@ -4,6 +4,7 @@
 # All Rights Reserved
 #
 import os
+import uuid
 
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from noaa_sdk import noaa
 
 from interposer import Interposer
 from interposer.example.weather import Weather
+from interposer.recorder import recorded
 from interposer.recorder import RecordedTestCase
 from interposer.recorder import TapeDeckCallHandler
 from interposer.tapedeck import Mode
@@ -123,3 +125,36 @@ class TestRecordedTestCase(RecordedTestCase):
         self.tapedeck.close()
         self.tapedeck.mode = Mode.Recording
         self.tapedeck.open()
+
+
+class BuiltinFunctionTestCase(RecordedTestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Set the recording environment variable because we record first.
+        """
+        os.environ["RECORDING"] = "1"
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Delete the recording file.
+        """
+        datafile = Path(str(cls.tapedeck.deck) + ".gz")
+        super().tearDownClass()
+        if datafile.exists():
+            datafile.unlink()
+        os.environ.pop("RECORDING")
+
+    @recorded(patches={"interposer.example.weather.uuid.uuid4": uuid.uuid4})
+    def test_uuid(self):
+        """
+        Tests how wrapping uuid interacts with taping.
+
+        It is common to interpose uuid so that the results get recorded and
+        played back, but in early testing when we only pickled the call context,
+        pickle complained because uuid.uuid4 was being wrapped in something.
+        """
+        uut = Weather()
+        assert uut.uniq()
