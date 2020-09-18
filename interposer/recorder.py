@@ -7,6 +7,7 @@ import gzip
 import inspect
 import os
 
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from typing import Dict
@@ -144,17 +145,18 @@ class RecordedTestCase(TestCase):
 def recorded(*, patches: Dict[str, Any]):
     """
     Closure to define a test method decorator that will record to a channel.
+
+    Can be used on a RecordedTestCase test.
     """
 
     @wrapt.decorator
     def recorded_channel(testmethod, testcase, args, kwargs):
-        # supports ONE right now
-        patched = list(patches.keys())
-        patchee = [patches[key] for key in patched]
-        tapedeck = testcase.tapedeck
         channel = testmethod.__name__
-        handler = TapeDeckCallHandler(tapedeck, channel=channel)
-        with patch(patched[0], new=Interposer(patchee[0], handler)):
+        handler = TapeDeckCallHandler(testcase.tapedeck, channel=channel)
+        with ExitStack() as evil:
+            for patched in list(patches.keys()):
+                patchee = patches[patched]
+                evil.enter_context(patch(patched, new=Interposer(patchee, handler)))
             return testmethod(*args, **kwargs)
 
     return recorded_channel
