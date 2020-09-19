@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 from typing import Callable
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Union
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -26,9 +28,83 @@ from interposer.tapedeck import Mode
 from interposer.tapedeck import TapeDeck
 
 
+class RecordedTestCase(TestCase):
+    """
+    Automatically configures a test case for recording or playback and
+    giving it a tapedeck attribute.
+
+    Calls will be placed into different channels which allows the recording
+    file to contain multiple call streams.  This allows multiple unit
+    tests in a test case to share the same recording file.  This technique
+    is compatible with distributed test harnesses like pytest-xdist as
+    long as all the tests in a test case are executed together.
+
+    Use the @recorded decorator to make it easy to patch things for recording.
+
+    When the environment variable RECORDING is set, the tests in this test
+    class will record what they do.  When the environment variable is not
+    set, the tests run in playback mode.
+
+    When the environment variable RECORDING_KEY is set, the recording is
+    encrypted and decrypted using the given key.  This is optional depending
+    on whether the recording has secrets in it.  When dealing with third party
+    packages that use tokens, they usually do.
+    """
+
+    # the name of the directory created alongside the test script
+    DATA_DIRECTORY = "tapes"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Prepare a tape deck for recording or playback.
+
+        The location of the tape deck will depend on the location of the
+        original test script.  A subdirectory named "tapes" is created and
+        one recording file per test class is created.
+        """
+        super().setUpClass()
+
+        mode = Mode.Recording if os.environ.get("RECORDING") else Mode.Playback
+        module = inspect.getmodule(cls)
+        testname = Path(module.__file__).stem
+        recordings = Path(module.__file__).parent / cls.DATA_DIRECTORY / testname
+
+        recording = recordings / f"{cls.__name__}.db"
+        if mode == Mode.Playback:
+            # decompress the recording
+            with gzip.open(str(recording) + ".gz", "rb") as fin:
+                with recording.open("wb") as fout:
+                    fout.write(fin.read())
+        else:
+            recordings.mkdir(parents=True, exist_ok=True)
+
+        cls.tapedeck = TapeDeck(recording, mode)
+        cls.tapedeck.open()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Finalize recording or playback.
+        """
+        mode = cls.tapedeck.mode
+        recording = cls.tapedeck.deck
+        cls.tapedeck.close()
+        if mode == Mode.Recording:
+            # compress the recording
+            with recording.open("rb") as fin:
+                with gzip.open(str(recording) + ".gz", "wb") as fout:
+                    fout.write(fin.read())
+
+        # recording is the uncompressed file - do not leave it around
+        recording.unlink()
+
+        super().tearDownClass()
+
+
 class TapeDeckCallHandler(CallHandler):
     """
-    An call handler that leverages the built-in tapedeck to record
+    A call handler that leverages the built-in tapedeck to record
     or playback a series of calls to a module, class, object, or
     function; the tape deck mode controls the behavior.
     """
@@ -77,74 +153,11 @@ class TapeDeckCallHandler(CallHandler):
         return result
 
 
-class RecordedTestCase(TestCase):
-    """
-    Enables tests to be run in a recording or playback mode.
-
-    Calls will be placed into different channels which allows the recording
-    file to contain multiple call streams.  This allows multiple unit
-    tests in a test case to share the same recording file.  This technique
-    is compatible with distributed test harnesses like pytest-xdist as
-    long as all the tests in a test case are executed together.
-
-    When the environment variable RECORDING is set, the tests in this test
-    class will record what they do.  When the environment variable is not
-    set, the tests run in playback mode.
-    """
-
-    # the name of the directory created alongside the test script
-    DATA_DIRECTORY = "tapes"
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        """
-        Prepare a tape deck for recording or playback.
-
-        The location of the tape deck will depend on the location of the
-        original test script.  A subdirectory named "tapes" is created and
-        one recording file per test class is created.
-        """
-        super().setUpClass()
-
-        mode = Mode.Recording if os.environ.get("RECORDING") else Mode.Playback
-        module = inspect.getmodule(cls)
-        testname = Path(module.__file__).stem
-        recordings = Path(module.__file__).parent / "tapes" / testname
-
-        recording = recordings / f"{cls.__name__}.db"
-        if mode == Mode.Playback:
-            # decompress the recording
-            with gzip.open(str(recording) + ".gz", "rb") as fin:
-                with recording.open("wb") as fout:
-                    fout.write(fin.read())
-        else:
-            recordings.mkdir(parents=True, exist_ok=True)
-
-        cls.tapedeck = TapeDeck(recording, mode)
-        cls.tapedeck.open()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """
-        Finalize recording or playback.
-        """
-        mode = cls.tapedeck.mode
-        recording = cls.tapedeck.deck
-        cls.tapedeck.close()
-        if mode == Mode.Recording:
-            # compress the recording
-            with recording.open("rb") as fin:
-                with gzip.open(str(recording) + ".gz", "wb") as fout:
-                    fout.write(fin.read())
-
-        # recording is the uncompressed file - do not leave it around
-        recording.unlink()
-
-        super().tearDownClass()
-
-
 def recorded(
-    *, patches: Dict[str, Any], handler_cls: TapeDeckCallHandler = TapeDeckCallHandler
+    *,
+    patches: Dict[str, Any],
+    prehandlers: Union[CallHandler, List[CallHandler]] = list(),
+    posthandlers: Union[CallHandler, List[CallHandler]] = list(),
 ) -> Callable:
     """
     Closure to define a test method decorator that will record to a channel.
@@ -159,17 +172,27 @@ def recorded(
         patches (dict): Each key is a string you would normally use with
                         patch() and the value is the actual class it will
                         eventually call.
-        handler_cls (TapeDeckCallHandler): The call handler to use
+        prehandlers (list): call handlers to run before the tape deck handler
+                            that gets added automatically
+        posthandlers (list): call handlers to run after the tape deck handler
+                             that gets added automatically
     """
 
     @wrapt.decorator
     def recorded_channel(testmethod, testcase, args, kwargs):
+        pre_handlers = prehandlers if isinstance(prehandlers, list) else [prehandlers]
+        post_handlers = (
+            posthandlers if isinstance(posthandlers, list) else [posthandlers]
+        )
         channel = testmethod.__name__
-        handler = handler_cls(testcase.tapedeck, channel=channel)
+        deck_handler = TapeDeckCallHandler(testcase.tapedeck, channel=channel)
+        call_handlers = pre_handlers + [deck_handler] + post_handlers
         with ExitStack() as evil:
             for patched in list(patches.keys()):
                 patchee = patches[patched]
-                evil.enter_context(patch(patched, new=Interposer(patchee, handler)))
+                evil.enter_context(
+                    patch(patched, new=Interposer(patchee, call_handlers))
+                )
             return testmethod(*args, **kwargs)
 
     return recorded_channel

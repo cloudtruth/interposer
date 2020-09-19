@@ -13,7 +13,6 @@ from noaa_sdk import noaa
 
 from interposer import Interposer
 from interposer.example.weather import Weather
-from interposer.recorder import recorded
 from interposer.recorder import RecordedTestCase
 from interposer.recorder import TapeDeckCallHandler
 from interposer.tapedeck import Mode
@@ -126,35 +125,22 @@ class TestRecordedTestCase(RecordedTestCase):
         self.tapedeck.mode = Mode.Recording
         self.tapedeck.open()
 
+    def test_cannot_pickle(self):
+        """
+        Tests the _advance logic when presented with an unpicklable call.
 
-class BuiltinFunctionTestCase(RecordedTestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        """
-        Set the recording environment variable because we record first.
-        """
-        os.environ["RECORDING"] = "1"
-        super().setUpClass()
+        The code falls back to sanitizing a repr() of the call instead, which
+        is still unique enough for most cases but we lose the ability to
+        distinguish different objects of the same type based on their
+        attributes.
 
-    @classmethod
-    def tearDownClass(cls) -> None:
+        The call is to an Interposer(uuid) due to the patching and the
+        TapeDeck will try to pickle it, fail, and fall back to a repr.
         """
-        Delete the recording file.
-        """
-        datafile = Path(str(cls.tapedeck.deck) + ".gz")
-        super().tearDownClass()
-        if datafile.exists():
-            datafile.unlink()
-        os.environ.pop("RECORDING")
-
-    @recorded(patches={"interposer.example.weather.uuid.uuid4": uuid.uuid4})
-    def test_uuid(self):
-        """
-        Tests how wrapping uuid interacts with taping.
-
-        It is common to interpose uuid so that the results get recorded and
-        played back, but in early testing when we only pickled the call context,
-        pickle complained because uuid.uuid4 was being wrapped in something.
-        """
-        uut = Weather()
-        assert uut.uniq()
+        with patch(
+            "uuid.uuid4",
+            new=Interposer(
+                uuid.uuid4, TapeDeckCallHandler(self.tapedeck, "test_cannot_pickle")
+            ),
+        ):
+            assert len(str(uuid.uuid4())) == 36

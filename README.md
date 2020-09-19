@@ -20,6 +20,8 @@ allows you to:
 - Audit external service calls.
 - Prevent unwanted future external service calls.
 
+FIXME SECURITY, talk about ability to encrypt
+
 ## TL;DR;
 
 ### Testing
