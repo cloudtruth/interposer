@@ -171,6 +171,9 @@ class Interposer(CallableObjectProxy):
 
         This means we've wrapped a class (when called makes an object) or
         that we've wrapped a method or function (when called returns a result).
+
+        It is intentional that we are not logging anything here, as this
+        information could contain secrets.
         """
         context = CallContext(self.__wrapped__, args, kwargs)
 
@@ -203,17 +206,15 @@ class Interposer(CallableObjectProxy):
         """
         Handle duck typing for the wrapped entity.
 
-        If the attribute is a module, class, method, or function, wrap it so that
-        we maintain capture.
+        If inspect says the attr has a module, which means it is not part of
+        the python distribution (that is an assumption) then wrap it, because
+        we want to wrap until we get to a __call__.  This allows top level
+        objects that construct helpers as attributes (@property) to be
+        captured properly.
         """
         attr = super().__getattr__(name)
-        if (
-            inspect.ismodule(attr)
-            or inspect.ismethod(attr)
-            or inspect.isclass(attr)
-            or inspect.isbuiltin(attr)
-            or inspect.isfunction(attr)
-        ):
+        wrap = inspect.isbuiltin(attr) or inspect.getmodule(attr)
+        if wrap:
             attr = Interposer(attr, self._self_handlers)
         return attr
 

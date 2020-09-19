@@ -10,6 +10,7 @@ import os
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
 from unittest import TestCase
@@ -142,17 +143,29 @@ class RecordedTestCase(TestCase):
         super().tearDownClass()
 
 
-def recorded(*, patches: Dict[str, Any]):
+def recorded(
+    *, patches: Dict[str, Any], handler_cls: TapeDeckCallHandler = TapeDeckCallHandler
+) -> Callable:
     """
     Closure to define a test method decorator that will record to a channel.
 
-    Can be used on a RecordedTestCase test.
+    This patches each key of the captures dictionary with a directive to
+    instantiate a new Interposer around the value that uses the handler_cls
+    to process each call.
+
+    This decorator can be used on a RecordedTestCase test.
+
+    Keyword Arguments:
+        patches (dict): Each key is a string you would normally use with
+                        patch() and the value is the actual class it will
+                        eventually call.
+        handler_cls (TapeDeckCallHandler): The call handler to use
     """
 
     @wrapt.decorator
     def recorded_channel(testmethod, testcase, args, kwargs):
         channel = testmethod.__name__
-        handler = TapeDeckCallHandler(testcase.tapedeck, channel=channel)
+        handler = handler_cls(testcase.tapedeck, channel=channel)
         with ExitStack() as evil:
             for patched in list(patches.keys()):
                 patchee = patches[patched]

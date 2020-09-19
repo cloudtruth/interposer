@@ -290,15 +290,9 @@ class TapeDeck(AbstractContextManager):
             # attempt to pickle the call object verbatim - this is a strong
             # guarantee of uniqueness
             result = self._hickle(context)
-        except pickle.PicklingError as ex:
+        except pickle.PicklingError:
             # since pickling the context with the call verbatim failed
             # fall back to using a string representation of the call
-            self._logger.log(
-                logging.DEBUG,
-                "pickle",
-                "fail",
-                str(ex) + "; falling back to repr(call)",
-            )
             save_call = context.call
             try:
                 sig = repr(context.call)
