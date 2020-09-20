@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2020-09-21
+
 This was a major refactoring to allow for custom call handlers.
 
 ### Breaking
@@ -18,9 +20,10 @@ This was a major refactoring to allow for custom call handlers.
 
 - Added RecordedTestCase and @recorded decorators for easier testing.
 - Added the ability to stack call handlers.
+- Added automatic secret redaction from TapeDeck recordings.
 - Eliminated special case code for dealing with primitives.
 
-## [0.7.0] - 2019-09-10
+## [0.7.0] - 2020-09-10
 
 ### Breaking
 
@@ -42,13 +45,13 @@ This was a major refactoring to allow for custom call handlers.
 - Fixed incorrect wrapping of python primitives like `str`.
 - Fixed call order parameter storage could be modified after call.
 
-## [0.6.1] - 2019-09-04
+## [0.6.1] - 2020-09-04
 
 ### Changed
 
 - `InterposedTestCase` now allows Interposer to be subclassed.
 
-## [0.6.0] - 2019-09-04
+## [0.6.0] - 2020-09-04
 
 ### Added
 
@@ -59,6 +62,6 @@ This was a major refactoring to allow for custom call handlers.
 - Updated the README.
 - Provided an example.
 
-## [0.5.0] - 2019-09-01
+## [0.5.0] - 2020-09-01
 
 Initial Release.

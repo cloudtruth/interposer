@@ -11,29 +11,42 @@ WARNING!!! This readme needs to be updated following the major refactoring.
 
 WARNING!!!
 
-Interposer allows you to add selective recording and playback of interactions
-with external services that are too complex to mock effectively.  Interposer
-allows you to:
+The interposer package core allows you to wrap a module, class, object, method,
+or function with the ability to perform pre- and post- call analysis or
+manipulation on the arguments, result, or exception.  With interposer you can:
 
-- Inject recording and playback into production code through tests -
-  sort of like mocks with a memory.
-- Audit external service calls.
-- Prevent unwanted future external service calls.
+- Audit calls made.
+- Block calls that should not be made (for example, read-only vs. read-write).
+- Modify arguments before calls are made.
+- Record and playback interactions with packages.
 
-FIXME SECURITY, checking recording file for secrets, how to redact
+Classic unit testing involves writing mocks or simulators for third party
+services.  When a service is mocked, the test is typically only as good as
+the simulation.  Classic integration testing runs live against a service,
+but it can take too long to be useful in normal development workflow.  What
+if you could have both?  You can - we call it hybrid testing.
+
+Hybrid testing allows you to test your code live against a third party service
+only when necessary and avoid the need to write your own mocks.  It is
+essentially a self-writing mock for your interaction.  Service mocks tend to
+be incomplete simulations and can lead to a false sense of security, however by
+using hybrid testing, you no longer have to worry about that.  Even better, the
+provided recording system includes a way to automatically redact secrets and
+still be able to play back.
 
 ## TL;DR;
 
-### Testing
+### Hybrid Testing
 
-To inject recording and playback into your tests, use the `InterposedTestCase`
-class and patch interposed versions of external services.  An example of this
-can be found in the [example_weather_test](https://github.com/tuono/interposer/blob/develop/tests/example_weather_test.py),
-which tests [weather.py](https://github.com/tuono/interposer/blob/develop/interposer/_testing/weather.py).
+To get started with hybrid testing, use the `RecordedTestCase` test fixture.
+An example of this can be found in the
+[example_weather_test](https://github.com/tuono/interposer/blob/develop/tests/example_weather_test.py).
+This is a simple test that demonstrates how easy it is to hook in recording
+and playback against an external service.
 
-To generate a recording, `InterposedTestCase` looks for an environment variable
+To generate a recording, `RecordedTestCase` looks for an environment variable
 named `RECORDING` and if set (and not empty), will generate a recording of the
-interaction with the interposed class(es):
+interaction with the interposed class(es) automatically:
 
 ```
 $ time RECORDING=1 make example
@@ -42,8 +55,23 @@ real    0m8.651s
 user    0m1.911s
 sys     0m0.219s
 
-$ ls -R tapes
-example_weather_test.TestWeather.test_print_forecast.db.gz
+$ tests/
+tests/:
+total 44
+-rw-r--r-- 1 testr testr    83 Sep 18 13:59 __init__.py
+-rw-r--r-- 1 testr testr   535 Sep 18 13:59 example_weather_test.py
+-rw-r--r-- 1 testr testr 11795 Sep 18 21:15 interposer_test.py
+-rw-r--r-- 1 testr testr  8483 Sep 19 22:44 recorder_test.py
+-rw-r--r-- 1 testr testr  8152 Sep 19 22:44 tapedeck_test.py
+drwxr-xr-x 3 testr testr  4096 Sep 20 07:57 tapes
+
+tests/tapes:
+total 4
+drwxr-xr-x 2 testr testr 4096 Sep 20 07:29 example_weather_test
+
+tests/tapes/example_weather_test:
+total 4
+-rw-r--r-- 1 testr testr 1678 Sep 20 07:14 TestWeather.db.gz
 ```
 
 Once the recording is generated, running the test again without the
@@ -61,19 +89,7 @@ Given tox has a roughly 2 second startup time, we see the playback is
 essentially as fast as a handcrafted mock, but took way less time to make!
 More details can be found in the Recording and Playback section below.
 
-FIXME: Add info about environment variables used during recording:
-
-RECORDING (turns on)
-TAPEDECKDEBUG (writes out every call context to a pickle file)
-
-### Auditing
-
-To facilitate auditing and call verification, use Interposer directly in
-your production code.  Interposer uses the
-[wrapt](https://github.com/GrahamDumpleton/wrapt) package to provide
-doppleganger support, with little noticable performance degradation.
-
-## Introduction
+## Background
 
 At Tuono when we first started working with the AWS and Azure SDKs, we
 realized that it would not be practical to mock those services in our
@@ -110,41 +126,34 @@ There is a simple example in this repository of a Weather object that
 leverages an external service.  Mocking this service would take time, as the
 response is fairly complex, but with interposer it's as easy as adding a patch.
 
-InterposedTestCase is a testing class that makes it easy to manage your
+RecordedTestCase is a testing class that makes it easy to manage your
 recordings automatically based on the name of the test module, class, and tests.
-Each test definition receives its own recording file so it is safe to use with
+Each test class receives its own recording file, and each test method is recorded
+into its own channel within the recording file, so it is safe to use in
 parallel testing.  This example test case inserts itself between the Weather
 class and the `noaa` class that it uses.
 
 ```python
-from pathlib import Path
-from unittest.mock import patch
-
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2020 Tuono, Inc.
+# All Rights Reserved
+#
 from noaa_sdk import noaa
 
-from interposer import InterposedTestCase
-from interposer._testing.weather import Weather
+from interposer.example.weather import Weather
+from interposer.recorder import recorded
+from interposer.recorder import RecordedTestCase
 
-class TestWeather(InterposedTestCase):
-    def setUp(self) -> None:
-        super().setUp(recordings=Path(__file__).parent / "tapes")
 
+class TestWeather(RecordedTestCase):
+    """ Example of a record/playback aware test. """
+
+    @recorded(patches={"interposer.example.weather.noaa": noaa})
     def test_print_forecast(self) -> None:
-        """
-        Inserts the interposer between the importing class
-        and the imported class.
-        """
-        with patch(
-            "interposer._testing.weather.noaa",
-            new=self.interposer.wrap(noaa)
-        ):
-            uut = Weather()
-            uut.print_forecast("11365", "US", False, 3)
+        uut = Weather()
+        assert len(uut.forecast("01001", "US", False, 3)) == 3
 ```
-
-The class `InterposedTestCase` is a convenience wrapper around the Interposer
-and generates recording files (or plays them back) based on the test id.  This
-makes it safe to run recording and playback with interposer in parallel.
 
 To generate a recording (this works if you "make prerequisites" first):
 
@@ -153,7 +162,7 @@ $ time RECORDING=1 make example
 ...
 tests/example_weather_test.py::TestWeather::test_print_forecast
 ------------------------------------------------------------------------------------------------- live log call -------------------------------------------------------------------------------------------------
-INFO     interposer.interposer:interposer.py:147 TAPE: Opened /home/jking/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Recording using version 5
+INFO     interposer.interposer:interposer.py:147 TAPE: Opened /home/testr/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Recording using version 5
 DEBUG    urllib3.connectionpool:connectionpool.py:943 Starting new HTTPS connection (1): nominatim.openstreetmap.org:443
 DEBUG    urllib3.connectionpool:connectionpool.py:442 https://nominatim.openstreetmap.org:443 "GET //search?postalcode=11365&country=US&format=json HTTP/1.1" 200 None
 DEBUG    urllib3.connectionpool:connectionpool.py:943 Starting new HTTPS connection (1): api.weather.gov:443
@@ -166,7 +175,7 @@ DEBUG    interposer.interposer:interposer.py:361 TAPE: Recording RESULT 25c0bc73
 {'number': 1, 'name': 'Overnight', 'startTime': '2020-09-04T04:00:00-04:00', 'endTime': '2020-09-04T06:00:00-04:00', 'isDaytime': False, 'temperature': 72, 'temperatureUnit': 'F', 'temperatureTrend': None, 'windSpeed': '8 mph', 'windDirection': 'W', 'icon': 'https://api.weather.gov/icons/land/night/sct?size=medium', 'shortForecast': 'Partly Cloudy', 'detailedForecast': 'Partly cloudy, with a low around 72. West wind around 8 mph.'}
 {'number': 2, 'name': 'Friday', 'startTime': '2020-09-04T06:00:00-04:00', 'endTime': '2020-09-04T18:00:00-04:00', 'isDaytime': True, 'temperature': 87, 'temperatureUnit': 'F', 'temperatureTrend': 'falling', 'windSpeed': '8 to 13 mph', 'windDirection': 'W', 'icon': 'https://api.weather.gov/icons/land/day/sct?size=medium', 'shortForecast': 'Mostly Sunny', 'detailedForecast': 'Mostly sunny. High near 87, with temperatures falling to around 84 in the afternoon. West wind 8 to 13 mph.'}
 {'number': 3, 'name': 'Friday Night', 'startTime': '2020-09-04T18:00:00-04:00', 'endTime': '2020-09-05T06:00:00-04:00', 'isDaytime': False, 'temperature': 66, 'temperatureUnit': 'F', 'temperatureTrend': None, 'windSpeed': '8 to 12 mph', 'windDirection': 'NW', 'icon': 'https://api.weather.gov/icons/land/night/few?size=medium', 'shortForecast': 'Mostly Clear', 'detailedForecast': 'Mostly clear, with a low around 66. Northwest wind 8 to 12 mph.'}
-INFO     interposer.interposer:interposer.py:158 TAPE: Closed /home/jking/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Recording using version 5
+INFO     interposer.interposer:interposer.py:158 TAPE: Closed /home/testr/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Recording using version 5
 PASSED
 
 =============================================================================================== 1 passed in 6.65s ===============================================================================================
@@ -183,8 +192,10 @@ Note the calls to urllib3 used by the noaa class, and note the amount of time
 that the test ran.  This command produced a new file:
 
 ```bash
-$ ls tapes
-example_weather_test.TestWeather.test_print_forecast.db.gz
+$ ls tests/tapes/example_weather_test
+tests/tapes/example_weather_test:
+total 4
+-rw-r--r-- 1 testr testr 1678 Sep 20 07:14 TestWeather.db.gz
 ```
 
 Now that the recording is in place, any time the test runs in the future it
@@ -196,12 +207,12 @@ $ time make example
 ...
 tests/example_weather_test.py::TestWeather::test_print_forecast
 ------------------------------------------------------------------------------------------------- live log call -------------------------------------------------------------------------------------------------
-INFO     interposer.interposer:interposer.py:147 TAPE: Opened /home/jking/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Playback using version 5
+INFO     interposer.interposer:interposer.py:147 TAPE: Opened /home/testr/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Playback using version 5
 DEBUG    interposer.interposer:interposer.py:313 TAPE: Playing back RESULT for 25c0bc73bd753f18e53c1b803d8d37e2ce8a7d7a.results call #0 for params {'method': 'get_forecasts', 'args': ('11365', 'US', False), 'kwargs': {}, 'channel': 'default'} hash=25c0bc73bd753f18e53c1b803d8d37e2ce8a7d7a type=list: [{'detailedForecast': 'Partly cloudy, with a low around 72. West wind around 8 '
 {'number': 1, 'name': 'Overnight', 'startTime': '2020-09-04T04:00:00-04:00', 'endTime': '2020-09-04T06:00:00-04:00', 'isDaytime': False, 'temperature': 72, 'temperatureUnit': 'F', 'temperatureTrend': None, 'windSpeed': '8 mph', 'windDirection': 'W', 'icon': 'https://api.weather.gov/icons/land/night/sct?size=medium', 'shortForecast': 'Partly Cloudy', 'detailedForecast': 'Partly cloudy, with a low around 72. West wind around 8 mph.'}
 {'number': 2, 'name': 'Friday', 'startTime': '2020-09-04T06:00:00-04:00', 'endTime': '2020-09-04T18:00:00-04:00', 'isDaytime': True, 'temperature': 87, 'temperatureUnit': 'F', 'temperatureTrend': 'falling', 'windSpeed': '8 to 13 mph', 'windDirection': 'W', 'icon': 'https://api.weather.gov/icons/land/day/sct?size=medium', 'shortForecast': 'Mostly Sunny', 'detailedForecast': 'Mostly sunny. High near 87, with temperatures falling to around 84 in the afternoon. West wind 8 to 13 mph.'}
 {'number': 3, 'name': 'Friday Night', 'startTime': '2020-09-04T18:00:00-04:00', 'endTime': '2020-09-05T06:00:00-04:00', 'isDaytime': False, 'temperature': 66, 'temperatureUnit': 'F', 'temperatureTrend': None, 'windSpeed': '8 to 12 mph', 'windDirection': 'NW', 'icon': 'https://api.weather.gov/icons/land/night/few?size=medium', 'shortForecast': 'Mostly Clear', 'detailedForecast': 'Mostly clear, with a low around 66. Northwest wind 8 to 12 mph.'}
-INFO     interposer.interposer:interposer.py:158 TAPE: Closed /home/jking/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Playback using version 5
+INFO     interposer.interposer:interposer.py:158 TAPE: Closed /home/testr/interposer/tests/tapes/example_weather_test.TestWeather.test_print_forecast.db for Mode.Playback using version 5
 PASSED
 
 =============================================================================================== 1 passed in 0.06s ===============================================================================================
@@ -227,11 +238,10 @@ logic changes around the third party calls.
 - Return values and exceptions must be safe for pickling.  Some
   third party APIs use local definitions for exceptions, for example,
   and local definitions cannot be pickled.  If you get a pickling
-  error, you should subclass Interposer and provide your own
-  cleanup routine(s) as needed to substitute a class that can be
-  substituted for the local definition.
-- Randomness between test runs generally defeats the interposer, however
-  you can record the randomness.
+  error, you can insert a CallHandler to run before the TapeDeckCallHandler
+  by specifying `prehandlers` in the @recorded decorator.
+- Randomness between test runs generally defeats recording and playback,
+  however you can record the randomness!
 
 ## Dealing with Randomness
 
@@ -242,40 +252,38 @@ with time-based identifiers.  The easiest way to get around this is to
 record the randomness!
 
 ```python
-from uuid import uuid4
+import uuid
 
 from some.example.project.randomness import Randomness
-from interposer.testcase import InterposedTestCase
+from interposer.recorder import RecordedTestCase
+from interposer.recorder import recorder
 
-class TestRandomness(InterposedTestCase):
+class TestRandomness(RecordedTestCase):
+
+    @recorded(patches={"some.example.project.randomness.uuid.uuid4": uuid.uuid4})
     def test_uuid(self) -> None:
-        with patch(
-            "some.example.project.randomness.uuid4",
-            new=self.interposer.wrap(uuid4)
-        ):
-            uut = Randomness()
-            uut.call_a_method_that_uses_uuids()
+        uut = Randomness()
+        uut.call_a_method_that_uses_uuids()
 ```
 
 In this fictituous and non-working example (some.example.project is not
-provided), calls to create uuids would be recorded.  You can stack
-interposed patches so that you can record the external service class as
-well as uuid at the same time.
-
+provided), calls to create uuids would be recorded.
 
 ## Call Auditing
+
+Use the Interposer to wrap a module, class, object, method, or function with
+a CallHandler that reports all the calls to an auditing service.
+
+To facilitate auditing and call verification, use Interposer directly in
+your production code.  Interposer leverages the fantastic
+[wrapt](https://github.com/GrahamDumpleton/wrapt) package to provide
+doppleganger support, with almost no performance degradation.
+
+## Call Blocking
 
 You may want to limit the types of methods that can be called in
 third party libraries as an extra measure of protection in certain
 runtime modes.  Interposer lets you intercept every method called
-in a wrapped class.
-
-TODO: provide example!
-
-## Other Notes
-
-- Interposer is a resource, so you need to call open() and close() or
-  use the ScopedInterposer context manager.
-
-This documentation is not complete, for example pre and post cleanup
-mechanisms are not documented, nor is the security check for call inspection.
+in a wrapped class.  You just have to implement a CallHandler and
+then wrap the module, class, object, method, or function you want to
+raise an exception when a call is not allowed.
