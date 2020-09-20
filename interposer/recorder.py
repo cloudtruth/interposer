@@ -45,6 +45,7 @@ class RecordedTestCase(TestCase):
     class will record what they do.  When the environment variable is not
     set, the tests run in playback mode.
 
+    NOTDONE (and maybe not necessary):
     When the environment variable RECORDING_KEY is set, the recording is
     encrypted and decrypted using the given key.  This is optional depending
     on whether the recording has secrets in it.  When dealing with third party
@@ -52,7 +53,7 @@ class RecordedTestCase(TestCase):
     """
 
     # the name of the directory created alongside the test script
-    DATA_DIRECTORY = "tapes"
+    TAPE_DIRECTORY_NAME: str = "tapes"
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -68,7 +69,7 @@ class RecordedTestCase(TestCase):
         mode = Mode.Recording if os.environ.get("RECORDING") else Mode.Playback
         module = inspect.getmodule(cls)
         testname = Path(module.__file__).stem
-        recordings = Path(module.__file__).parent / cls.DATA_DIRECTORY / testname
+        recordings = Path(module.__file__).parent / cls.TAPE_DIRECTORY_NAME / testname
 
         recording = recordings / f"{cls.__name__}.db"
         if mode == Mode.Playback:
@@ -100,6 +101,14 @@ class RecordedTestCase(TestCase):
         recording.unlink()
 
         super().tearDownClass()
+
+    def redact(self, secret: str) -> str:
+        """
+        Redact a secret in playback mode, and keep track of the secret in
+        recording mode.  This allows tests to use secrets quite normally.
+        Callers just have to remember to run secrets through redact().
+        """
+        return self.tapedeck.redact(secret)
 
 
 class TapeDeckCallHandler(CallHandler):

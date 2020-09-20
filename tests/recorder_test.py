@@ -3,6 +3,7 @@
 # Copyright (C) 2020 Tuono, Inc.
 # All Rights Reserved
 #
+import gzip
 import os
 import uuid
 
@@ -16,6 +17,7 @@ from interposer.example.weather import Weather
 from interposer.recorder import RecordedTestCase
 from interposer.recorder import TapeDeckCallHandler
 from interposer.tapedeck import Mode
+from interposer.tapedeck import RecordedCallNotFoundError
 
 
 class TestRecordedTestCase(RecordedTestCase):
@@ -144,3 +146,92 @@ class TestRecordedTestCase(RecordedTestCase):
             ),
         ):
             assert len(str(uuid.uuid4())) == 36
+
+
+class HolderOfFineSecrets(object):
+    """
+    Tests call argument, recorded results.
+    """
+
+    def __init__(self, token: str):
+        self.token = token
+
+    def get_token(self) -> str:
+        return self.token
+
+
+class SecretsTestCase(RecordedTestCase):
+    """
+    Tests the secret redaction capability.
+    """
+
+    token = "6effb02c-f1f7-4f07-bdc6-eef14e4efba5"  # nosec
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Set the recording environment variable because we record first.
+        """
+        os.environ["RECORDING"] = "1"
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Delete the recording file since we tested both modes in one test.
+        """
+        datafile = Path(str(cls.tapedeck.deck) + ".gz")
+        redactions = cls.tapedeck.redactions
+        super().tearDownClass()
+        if datafile.exists():
+            with gzip.open(datafile, "rb") as fin:
+                raw = fin.read()
+                for secret in redactions:
+                    assert (
+                        secret.encode() not in raw
+                    ), "a secret leaked into the recording"
+            datafile.unlink()
+        os.environ.pop("RECORDING")
+
+    def test_secrets(self):
+        """
+        In recording mode, redact() keeps track of the secret and returns it
+        for use by the caller so the live testing works.  At the end of
+        recording the test fixture removes the secrets from the recording,
+        replacing them with redactions (all carats).
+
+        In playback mode, redact() converts the secret to all carats, so the
+        calls with the secret as an argument can be found.
+        """
+        # here's our "secret"
+        # wrap the class
+        cls = Interposer(
+            HolderOfFineSecrets,
+            handlers=TapeDeckCallHandler(self.tapedeck, self.id().split(".")[-1]),
+        )
+        # instantiate the class using a *gasp* secret
+        # in recording mode this passes the secret through and adds it to a
+        # post-processing redaction list and after the recording file is closed
+        # the secrets get redacted; in playback mode this redacts it immediately
+        # so the playback matches the recording
+        assert not self.tapedeck.redactions
+        uut = cls(self.redact(self.token))
+        assert self.tapedeck.redactions
+        assert uut.get_token() == self.redact(self.token)
+        assert self.redact(self.token) == self.token
+
+        self.tapedeck.close()  # applies redaction to recording
+        self.tapedeck.mode = Mode.Playback
+        self.tapedeck.open()
+
+        assert not self.tapedeck.redactions
+        uut = cls(self.redact(self.token))
+        assert self.redact(self.token) == ("^" * 36)
+        assert uut.get_token() == ("^" * 36)
+        with self.assertRaises(RecordedCallNotFoundError):
+            uut.get_token()
+
+        # put it back into Recording mode so the fixture can clean up
+        self.tapedeck.close()
+        self.tapedeck.mode = Mode.Recording
+        self.tapedeck.open()

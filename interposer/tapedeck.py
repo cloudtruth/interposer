@@ -9,13 +9,18 @@ import pickle  # nosec
 import shelve
 
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from enum import auto
 from enum import Enum
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import Optional
+from typing import Set
+
+import yaml
 
 from interposer import CallContext
 
@@ -30,6 +35,17 @@ class Mode(Enum):
 
     Playback = auto()
     Recording = auto()
+
+
+@dataclass
+class Payload:
+    """
+    The record for the content behind each hash.
+    """
+
+    context: CallContext
+    result: Any
+    ex: Exception
 
 
 class TapeDeckError(RuntimeError):
@@ -137,6 +153,7 @@ class TapeDeck(AbstractContextManager):
         self.deck = deck
         self.file_format = None
         self.mode = mode
+        self.redactions: Set[str] = set()
 
         self._logger = logging.getLogger(__name__)
 
@@ -154,6 +171,30 @@ class TapeDeck(AbstractContextManager):
     def __exit__(self, *exc_details):
         """ AbstractContextManager """
         self.close()
+
+    def dump(self, outfile: Path) -> None:
+        """
+        Dump the database file for analysis.
+        """
+        results = {}
+        for key in self._tape.keys():
+            payload = self._tape[key]
+            if len(key) != 64:
+                results[key] = payload
+            else:
+                results.setdefault(payload.context.meta["tape"]["channel"], []).append(
+                    payload
+                )
+        for channel in results.keys():
+            if len(channel) == 64:
+                results[channel] = list(
+                    sorted(
+                        results[channel],
+                        key=lambda item: item.context.meta["tape"]["ordinal"],
+                    )
+                )
+        with outfile.open("w") as fout:
+            yaml.dump(results, fout, default_flow_style=False)
 
     def open(self) -> None:
         """
@@ -187,6 +228,9 @@ class TapeDeck(AbstractContextManager):
             self.file_format = self.CURRENT_FILE_FORMAT
 
         # ensure if close() then open() is called we reset the ordinals to zero
+        self._call_ordinals = dict()
+        self.redactions = set()
+
         self._call_ordinals = {}
 
         self._log(
@@ -232,8 +276,15 @@ class TapeDeck(AbstractContextManager):
         """
         uniq = self._advance(context, channel)
 
-        # the recording content is primitive: Tuple[Any, Exception]
-        self._tape[uniq] = (result, ex)
+        payload = Payload(context=context, result=result, ex=ex)
+        try:
+            self._tape[uniq] = self._redact(payload)
+        except pickle.PicklingError:
+            save_call = self._reduce_call(context)
+            try:
+                self._tape[uniq] = self._redact(payload)
+            finally:
+                context.call = save_call
 
         if ex is None:
             self._log_result("record", context, result)
@@ -260,15 +311,33 @@ class TapeDeck(AbstractContextManager):
         if isinstance(recorded, RecordedCallNotFoundError):
             raise recorded
 
-        # the recording content is primitive: Tuple[Any, Exception]
-        (result, ex) = recorded
+        payload = recorded
 
-        if ex is None:
-            self._log_result("playback", context, result)
-            return result
+        if payload.ex is None:
+            self._log_result("playback", context, payload.result)
+            return payload.result
         else:
-            self._log_ex("playback", context, ex)
-            raise ex
+            self._log_ex("playback", context, payload.ex)
+            raise payload.ex
+
+    def redact(self, secret: str) -> str:
+        """
+        Auto-track secrets for redaction.
+
+        In recording mode this returns the secret and makes sure the secret
+        never makes it into the recording; instead a redacted version does,
+        which is done before call contexts get hashed so the hashed context
+        is of the redacted context.  The results and exceptions are also
+        redacted before storage.
+
+        In playback mode the redacted secret is returned so the lookup finds
+        the redacted context.
+        """
+        if self.mode == Mode.Recording:
+            self.redactions.add(secret)
+            return secret
+        else:
+            return "^" * len(secret)
 
     def _advance(self, context: CallContext, channel: str) -> str:
         """
@@ -293,43 +362,27 @@ class TapeDeck(AbstractContextManager):
         except pickle.PicklingError:
             # since pickling the context with the call verbatim failed
             # fall back to using a string representation of the call
-            save_call = context.call
+            save_call = self._reduce_call(context)
             try:
-                sig = repr(context.call)
-                pos = 0
-                while True:
-                    pos = sig.find(" at 0x", pos)
-                    if pos == -1:
-                        break
-                    pos += 6
-                    end = pos
-                    while sig[end].isalnum():
-                        end += 1
-                    sig = sig[:pos] + "0decafcoffee" + sig[end:]
-                    pos += 12
-                context.call = sig
-                # if the next line fails, one of the args or kwargs cannot be pickled
-                # so a CallHandler needs to be inserted before this one to modify it
                 result = self._hickle(context)
             finally:
                 context.call = save_call
-
         our_meta[self.LABEL_HASH] = result
         return result
 
     def _hickle(self, context: CallContext) -> str:
         """
-        Hash the call context using pickle.
+        Hash a context using a redacted pickle.
 
         Raises:
             PicklingError if something in the context cannot be pickled.
         """
-        raw = pickle.dumps(context, protocol=self.PICKLE_PROTOCOL)
+        raw = self._redact(context, return_bytes=True)
         # if TAPEDECKDEBUG is in the environment we dump out the raw pickles so
         # we can use "python3 -m pickletools <file>" to dump out the actual
         # raw pickle content and determine why there was a mismatch; to be used
         # when playback raises RecordedCallNotFoundError
-        if "TAPEDECKDEBUG" in os.environ:
+        if "TAPEDECKDEBUG" in os.environ and context:
             calldir = Path(str(self.deck) + "-calls")
             calldir.mkdir(exist_ok=True)
             our_meta = context.meta[self.LABEL_TAPE]
@@ -380,3 +433,47 @@ class TapeDeck(AbstractContextManager):
             )
         if self._logger.isEnabledFor(self.DEBUG_WITH_RESULTS):
             context.meta[self.LABEL_TAPE].pop(self.LABEL_RESULT)
+
+    def _redact(self, entity: Any, return_bytes: bool = False) -> Any:
+        """
+        Redacts any known secrets in an object by converting it to pickled
+        binary form, then doing a binary secret replacement, then unpickling.
+
+        This is used before we hash contexts and before we store results to
+        make sure there are no secrets in the recording.  The secrets must
+        be fed to us from the consumer (self.redactions).
+
+        Raises:
+            PicklingError if something in the context cannot be pickled.
+        """
+        raw = pickle.dumps(entity, protocol=self.PICKLE_PROTOCOL)
+        for secret in self.redactions:
+            binary_secret = secret.encode()
+            redacted_secret = ("^" * len(secret)).encode()
+            raw = raw.replace(binary_secret, redacted_secret)
+        return pickle.loads(raw) if not return_bytes else raw  # nosec
+
+    def _reduce_call(self, context: CallContext) -> Callable:
+        """
+        Normally we try to store the call verbatim but if pickling fails
+        we fall back to a string representation.
+
+        Returns:
+            The original call so it can be replaced after recording
+            using a fianlly block.
+        """
+        sig = repr(context.call)
+        pos = 0
+        while True:
+            pos = sig.find(" at 0x", pos)
+            if pos == -1:
+                break
+            pos += 6
+            end = pos
+            while sig[end].isalnum():
+                end += 1
+            sig = sig[:pos] + "0decafcoffee" + sig[end:]
+            pos += 12
+        result = context.call
+        context.call = sig
+        return result

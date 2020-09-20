@@ -32,6 +32,18 @@ class SomeClass(object):
         return uuid.uuid4()
 
 
+class KeeperOfFineSecrets(object):
+    """
+    A typical object that holds a secret (token).
+    """
+
+    def __init__(self, token: str) -> None:
+        self.api_key = token
+
+    def get_token(self) -> str:
+        return self.api_key
+
+
 class TapeDeckTest(TestCase):
     def setUp(self):
         self.datadir = Path(tempfile.mkdtemp())
@@ -159,3 +171,48 @@ class TapeDeckTest(TestCase):
                     pass
         finally:
             TapeDeck.EARLIEST_FILE_FORMAT_SUPPORTED = save
+
+    def test_recording_secrets(self):
+        """ Tests automatic redaction of known secrets and use in playback """
+        token = str(uuid.uuid4())
+        redacted_token = "^" * 36
+        keeper = KeeperOfFineSecrets(token)
+
+        # pretend someone created an object and made two calls where one succeeds and one raises
+
+        with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
+            uut.redactions.add(token)
+            uut.record(
+                CallContext(call=KeeperOfFineSecrets, args=(token,), kwargs={}),
+                keeper,
+                None,
+            )
+            uut.record(
+                CallContext(call=keeper.get_token, args=(), kwargs={}), token, None
+            )
+            uut.record(
+                CallContext(call=keeper.get_token, args=(), kwargs={}),
+                None,
+                ValueError(token),
+            )
+
+        # now during playback see everything with a secret (token) has been redacted!
+
+        with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
+            redacted_keeper = uut.playback(
+                CallContext(call=KeeperOfFineSecrets, args=(redacted_token,), kwargs={})
+            )
+            assert redacted_keeper.get_token() == redacted_token
+            assert (
+                uut.playback(
+                    CallContext(call=redacted_keeper.get_token, args=(), kwargs={})
+                )
+                == redacted_token
+            )
+            with self.assertRaises(ValueError) as ex:
+                assert uut.playback(
+                    CallContext(call=redacted_keeper.get_token, args=(), kwargs={})
+                )
+            assert token not in str(ex.exception)
+            assert redacted_token in str(ex.exception)
+            uut.dump(self.datadir / "dump.yaml")

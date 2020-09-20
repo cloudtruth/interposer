@@ -20,7 +20,7 @@ allows you to:
 - Audit external service calls.
 - Prevent unwanted future external service calls.
 
-FIXME SECURITY, talk about ability to encrypt
+FIXME SECURITY, checking recording file for secrets, how to redact
 
 ## TL;DR;
 
