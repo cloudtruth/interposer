@@ -287,3 +287,20 @@ runtime modes.  Interposer lets you intercept every method called
 in a wrapped class.  You just have to implement a CallHandler and
 then wrap the module, class, object, method, or function you want to
 raise an exception when a call is not allowed.
+
+## Secrets!
+
+The recording system has a built-in secrets redacter.  In a test method, before
+a secret is used, call `self.redact(secret)`.  If the tape deck is in recording
+mode, the secret is passed to the tape deck for redaction.  This means:
+
+1. The real secret is passed to the actual call during recording.
+2. The secret is then replaced by typesafe redaction holistically and reliably
+   in the argument list, and result or exception so the secret can never exist
+   in the recording file.
+3. The recording's call signature is calculated with redacted secrets so that
+   when redacted secrets are used during playback, the calls can be found.
+
+In playback mode, call `self.redact(secret)` and it will return a redacted
+string for you to use in place of the secret.  This allows the playback call
+signatures to match the recorded call signatures.
