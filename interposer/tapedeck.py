@@ -88,6 +88,22 @@ class TapeDeckOpenError(TapeDeckError):
         super().__init__("The tape deck is already open.")
 
 
+class Dumper(yaml.Dumper):
+    """
+    A YAML dumper that formats the data nicely.
+
+    In particular this dumper will disable default flow, and
+    will add a double indent for list entries, for example:
+
+    mylist:
+      - one
+      - two
+    """
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+
 class TapeDeck(AbstractContextManager):
     """
     A pickling call recording and playback class.
@@ -175,18 +191,25 @@ class TapeDeck(AbstractContextManager):
     def dump(self, outfile: Path) -> None:
         """
         Dump the database file for analysis.
+
+        The resulting file format is:
+
+        _file_format: N
+        channel:
+          - payload (sorted by ordinal)
         """
         results = {}
+
         for key in self._tape.keys():
             payload = self._tape[key]
-            if len(key) != 64:
+            if key[0] == "_":
                 results[key] = payload
             else:
-                results.setdefault(payload.context.meta["tape"]["channel"], []).append(
-                    payload
-                )
+                channel = payload.context.meta["tape"]["channel"]
+                results.setdefault(channel, []).append(payload)
+
         for channel in results.keys():
-            if len(channel) == 64:
+            if channel[0] != "_":
                 results[channel] = list(
                     sorted(
                         results[channel],
@@ -194,7 +217,7 @@ class TapeDeck(AbstractContextManager):
                     )
                 )
         with outfile.open("w") as fout:
-            yaml.dump(results, fout, default_flow_style=False)
+            yaml.dump(results, fout, Dumper=Dumper)
 
     def open(self) -> None:
         """
@@ -354,19 +377,17 @@ class TapeDeck(AbstractContextManager):
         our_meta[self.LABEL_CHANNEL] = channel
         our_meta[self.LABEL_ORDINAL] = ordinal
 
-        result = None
+        # we tried pickling the call verbatim however it pulls in so
+        # many things including the method's class object properties
+        # that it was difficult to make this idempotent, so instead
+        # we use the repr() of the call, and rely on the args and
+        # kwargs of the call to provide enough disambiguation
+        original_call = self._reduce_call(context)
         try:
-            # attempt to pickle the call object verbatim - this is a strong
-            # guarantee of uniqueness
             result = self._hickle(context)
-        except pickle.PicklingError:
-            # since pickling the context with the call verbatim failed
-            # fall back to using a string representation of the call
-            save_call = self._reduce_call(context)
-            try:
-                result = self._hickle(context)
-            finally:
-                context.call = save_call
+        finally:
+            context.call = original_call
+
         our_meta[self.LABEL_HASH] = result
         return result
 
