@@ -20,6 +20,8 @@ This was a major refactoring to allow for custom call handlers.
 
 - Added RecordedTestCase and @recorded decorators for easier testing.
 - Added the ability to stack call handlers.
+- Allow a call handler that runs before the recorder to selectively
+  disable recording of a call.
 - Added automatic secret redaction from TapeDeck recordings.
 - Eliminated special case code for dealing with primitives.
 
