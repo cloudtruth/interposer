@@ -165,6 +165,13 @@ class Interposer(CallableObjectProxy):
         super().__init__(entity)
         self._self_handlers = handlers if isinstance(handlers, list) else [handlers]
 
+    @staticmethod
+    def rewrap(context: CallContext) -> None:
+        """
+        Mark a context for rewrapping on return.
+        """
+        context.meta.setdefault("handler", {})["rewrap"] = True
+
     def __call__(self, *args, **kwargs):
         """
         Handle a call on a wrapped callable.
@@ -188,6 +195,7 @@ class Interposer(CallableObjectProxy):
                     return bypass.result
 
         # call the actual call
+        rewrap = inspect.isclass(self.__wrapped__)
         try:
             result = super().__call__(*args, **kwargs)
         except Exception as ex:
@@ -196,8 +204,9 @@ class Interposer(CallableObjectProxy):
             raise
         for handler in self._self_handlers:
             result = handler.on_call_end_result(context, result)
+            rewrap = rewrap or context.meta.get("handler", {}).get("rewrap", False)
 
-        if inspect.isclass(self.__wrapped__):
+        if rewrap:
             # creating an object from a wrapped class also wraps the object
             result = Interposer(result, self._self_handlers)
         return result

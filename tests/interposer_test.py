@@ -121,6 +121,17 @@ class LoggingCallHandler(CallHandler):
         self.logger.error("on_call_end_exception", exc_info=True)  # str(ex))
 
 
+class RewrapCallHandler(CallHandler):
+    """
+    Marks all contexts as rewrappable which means all results from calls
+    get rewrapped for additional recording.
+    """
+
+    def on_call_end_result(self, context: CallContext, result: Any) -> Any:
+        Interposer.rewrap(context)
+        return result
+
+
 class InterposerTest(TestCase):
     """
     Tests the basic functionality of the interposer harness.
@@ -285,6 +296,15 @@ class InterposerTest(TestCase):
             # normally the SimpleClass would raise SimpleError
             # but the interposer is changing the call behavior
             uut.regular_call("foo", "bar", kwarg1="sam", kwarg2="dean")
+
+    def test_interposer_rewrap(self):
+        """
+        Tests rewrap logic.
+        """
+        rewrapper = RewrapCallHandler()
+        uut = Interposer(standalone_function, rewrapper)
+        result = uut(24)
+        assert isinterposed(result)
 
     def test_interposer_standalone_function(self):
         """
