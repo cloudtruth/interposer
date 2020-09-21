@@ -45,6 +45,12 @@ class CallContext:
     kwargs: Dict[str, Any]
     meta: Dict[str, Any] = field(default_factory=dict)
 
+    def rewrap(self) -> None:
+        """
+        Mark a context for rewrapping on return.
+        """
+        self.meta.setdefault("handler", {})["rewrap"] = True
+
 
 class CallHandler(object):
     """
@@ -164,13 +170,6 @@ class Interposer(CallableObjectProxy):
         """
         super().__init__(entity)
         self._self_handlers = handlers if isinstance(handlers, list) else [handlers]
-
-    @staticmethod
-    def rewrap(context: CallContext) -> None:
-        """
-        Mark a context for rewrapping on return.
-        """
-        context.meta.setdefault("handler", {})["rewrap"] = True
 
     def __call__(self, *args, **kwargs):
         """

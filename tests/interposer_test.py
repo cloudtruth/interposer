@@ -128,7 +128,7 @@ class RewrapCallHandler(CallHandler):
     """
 
     def on_call_end_result(self, context: CallContext, result: Any) -> Any:
-        Interposer.rewrap(context)
+        context.rewrap()
         return result
 
 
