@@ -159,8 +159,8 @@ class Interposer(CallableObjectProxy):
         with the behaviors of any CallHandler provided in the argument list.
 
         Args:
-            poser (Interposer): The interposer to use for call processing.
-            thing (Any): A module, class, object, method, or function.
+            entity (Any): A module, class, object, method, or function.
+            handlers (list): Call handlers to invoke
         """
         super().__init__(entity)
         self._self_handlers = handlers if isinstance(handlers, list) else [handlers]
