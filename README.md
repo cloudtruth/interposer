@@ -5,20 +5,16 @@
 [![codecov](https://codecov.io/gh/tuono/interposer/branch/develop/graph/badge.svg?token=HKUTULQQSA)](https://codecov.io/gh/tuono/interposer)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-WARNING!!!
-
-WARNING!!! This readme needs to be updated following the major refactoring.
-
-WARNING!!!
-
 The interposer package core allows you to wrap a module, class, object, method,
 or function with the ability to perform pre- and post- call analysis or
-manipulation on the arguments, result, or exception.  With interposer you can:
+manipulation on the arguments, result, or exception.  This behavior can either
+be "always on" (i.e. in production code) or patched in through tests.  With
+interposer you can:
 
 - Audit calls made.
 - Block calls that should not be made (for example, read-only vs. read-write).
 - Modify arguments before calls are made.
-- Record and playback interactions with packages.
+- Record and playback interactions with packages for hybrid testing.
 
 Classic unit testing involves writing mocks or simulators for third party
 services.  When a service is mocked, the test is typically only as good as
@@ -32,7 +28,8 @@ essentially a self-writing mock for your interaction.  Service mocks tend to
 be incomplete simulations and can lead to a false sense of security, however by
 using hybrid testing, you no longer have to worry about that.  Even better, the
 provided recording system includes a way to automatically redact secrets and
-still be able to play back.
+still be able to play back.  If a live test against a service takes minutes,
+it will only take seconds when played back.
 
 ## TL;DR;
 
@@ -95,7 +92,8 @@ At Tuono when we first started working with the AWS and Azure SDKs, we
 realized that it would not be practical to mock those services in our
 tests.  Mocking a complex multi-step interaction with a third party service
 such as a cloud provider can be very time-consuming and error-prone.
-Entire projects already exist which attempt to mock these service interfaces.
+Entire projects already exist which attempt to mock these service interfaces,
+and those projects are both incomplete and incorrect at any given time.
 Maintaining such a footprint requires tremendous effort, and if the mock
 responses are not correct, it leads to a false sense of code quality which
 can then fail in front of a customer when used against the real thing.
