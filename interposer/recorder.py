@@ -130,6 +130,13 @@ class TapeDeckCallHandler(CallHandler):
         self._self_channel = channel
         self._self_deck = deck
 
+    @staticmethod
+    def norecord(context: CallContext) -> None:
+        """
+        Mark the context as not recordable.
+        """
+        context.meta.setdefault("handler", {})["record"] = False
+
     def on_call_begin(self, context: CallContext) -> Optional[CallBypass]:
         """
         Handle a call in playback mode.
@@ -148,7 +155,8 @@ class TapeDeckCallHandler(CallHandler):
         but an assert is placed for good measure.
         """
         assert self._self_deck.mode == Mode.Recording
-        self._self_deck.record(context, None, ex, channel=self._self_channel)
+        if context.meta.get("handler", {}).get("record") is not False:
+            self._self_deck.record(context, None, ex, channel=self._self_channel)
 
     def on_call_end_result(self, context: CallContext, result: Any) -> Any:
         """
@@ -158,7 +166,8 @@ class TapeDeckCallHandler(CallHandler):
         but an assert is placed for good measure.
         """
         assert self._self_deck.mode == Mode.Recording
-        self._self_deck.record(context, result, None, channel=self._self_channel)
+        if context.meta.get("handler", {}).get("record") is not False:
+            self._self_deck.record(context, result, None, channel=self._self_channel)
         return result
 
 
