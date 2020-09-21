@@ -45,7 +45,7 @@ To generate a recording, `RecordedTestCase` looks for an environment variable
 named `RECORDING` and if set (and not empty), will generate a recording of the
 interaction with the interposed class(es) automatically:
 
-```
+```bash
 $ time RECORDING=1 make example
 ...
 real    0m8.651s
@@ -74,7 +74,7 @@ total 4
 Once the recording is generated, running the test again without the
 environment variable causes the playback to happen:
 
-```
+```bash
 $ time tox example_weather_test.py
 ...
 real    0m2.039s
