@@ -34,12 +34,15 @@ class CallContext:
 
     Attributes:
         call (Callable): the entity called
-        args: (tuple): the original call arguments
-        kwargs (dict): the original call keyword arguments
+        args (tuple): the call arguments
+        kwargs (dict): the call keyword arguments
         meta (dict): temporary storage for the duration of the call
                      that can be used by implementations to pass data
                      between begin and end call handling, also used to
                      affect behavior of certian call handlers
+
+        rewrap (bool): used to control whether the result is rewrapped
+                       this implements selective diving
     """
 
     call: Callable

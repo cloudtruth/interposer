@@ -8,7 +8,6 @@ import os
 import uuid
 
 from pathlib import Path
-from typing import Any
 from typing import Optional
 from unittest.mock import patch
 
@@ -25,27 +24,7 @@ from interposer.tapedeck import Mode
 from interposer.tapedeck import RecordedCallNotFoundError
 
 
-class DoNotRecordCallHandler(CallHandler):
-    """
-    Instructs the tape deck call handler not to record anything.
-
-    This is how a call handler put in before the TapeDeckCallHandler
-    can ask for selective recording of content.
-    """
-
-    def on_call_end_result(self, context: CallHandler, result: Any) -> Any:
-        if result == 42:
-            TapeDeckCallHandler.norecord(context)
-        return result
-
-    def on_call_end_exception(self, context: CallHandler, ex: Exception) -> None:
-        TapeDeckCallHandler.norecord(context)
-
-
-class DoNotRecordMe(object):
-    def raise_exception(self):
-        raise ValueError(42)
-
+class SomeClass(object):
     def times_two(self, value: int):
         return value * 2
 
@@ -184,28 +163,6 @@ class TestRecordedTestCase(RecordedTestCase):
         ):
             assert len(str(uuid.uuid4())) == 36
 
-    def test_selective_recording(self) -> None:
-        """ Tests ability to selectively disable recording. """
-        uut = Interposer(
-            DoNotRecordMe(),
-            handlers=[
-                DoNotRecordCallHandler(),
-                TapeDeckCallHandler(self.tapedeck, "test_selective_recording"),
-            ],
-        )
-
-        # we will make three calls, but only one will record; if all of them
-        # were to record the ordinal count for the channel would be at 2 (0, 1, 2)
-
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") is None
-        assert uut.times_two(21) == 42  # when result is 42 recording disabled
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") is None
-        assert uut.times_two(42) == 84
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") == 0
-        with self.assertRaises(ValueError):
-            uut.raise_exception()
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") == 0
-
     def test_selective_rewrap(self) -> None:
         """
         Tests ability to selectively rewrap result even during playback.
@@ -214,7 +171,7 @@ class TestRecordedTestCase(RecordedTestCase):
         assert self.tapedeck.mode == Mode.Recording
 
         uut = Interposer(
-            DoNotRecordMe(),
+            SomeClass(),
             handlers=[
                 RewrapCallHandler(),
                 TapeDeckCallHandler(self.tapedeck, "test_selective_rewrap"),
@@ -229,7 +186,7 @@ class TestRecordedTestCase(RecordedTestCase):
         self.tapedeck.open()
 
         uut = Interposer(
-            DoNotRecordMe(),
+            SomeClass(),
             handlers=[
                 RewrapCallHandler(),
                 TapeDeckCallHandler(self.tapedeck, "test_selective_rewrap"),
