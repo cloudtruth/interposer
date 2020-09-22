@@ -37,7 +37,9 @@ class CallContext:
         args: (tuple): the original call arguments
         kwargs (dict): the original call keyword arguments
         meta (dict): temporary storage for the duration of the call
-                     that can be used by implementations
+                     that can be used by implementations to pass data
+                     between begin and end call handling, also used to
+                     affect behavior of certian call handlers
     """
 
     call: Callable
@@ -45,11 +47,13 @@ class CallContext:
     kwargs: Dict[str, Any]
     meta: Dict[str, Any] = field(default_factory=dict)
 
-    def rewrap(self) -> None:
-        """
-        Mark a context for rewrapping on return.
-        """
-        self.meta.setdefault("handler", {})["rewrap"] = True
+    @property
+    def rewrap(self) -> bool:
+        return self.meta.get("_flags", {}).get("rewrap", False)
+
+    @rewrap.setter
+    def rewrap(self, value: bool) -> None:
+        self.meta.setdefault("_flags", {})["rewrap"] = value
 
 
 class CallHandler(object):
@@ -187,26 +191,26 @@ class Interposer(CallableObjectProxy):
         for handler in self._self_handlers:
             bypass = handler.on_call_begin(context)
             if bypass:
-                if inspect.isclass(self.__wrapped__):
+                if inspect.isclass(self.__wrapped__) or context.rewrap:
                     # returning a recorded result of a __call__ so wrap the object
                     return Interposer(bypass.result, self._self_handlers)
                 else:
                     return bypass.result
 
-        # call the actual call
+        # creating an object from a wrapped class also wraps the object
         rewrap = inspect.isclass(self.__wrapped__)
         try:
+            # the actual call
             result = super().__call__(*args, **kwargs)
         except Exception as ex:
             for handler in self._self_handlers:
                 handler.on_call_end_exception(context, ex)
-            raise
+            raise  # none of them raised, so we can reraise to preserve error
         for handler in self._self_handlers:
             result = handler.on_call_end_result(context, result)
-            rewrap = rewrap or context.meta.get("handler", {}).get("rewrap", False)
+            rewrap = rewrap or context.rewrap  # selective rewrap
 
         if rewrap:
-            # creating an object from a wrapped class also wraps the object
             result = Interposer(result, self._self_handlers)
         return result
 

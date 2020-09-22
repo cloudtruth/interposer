@@ -143,9 +143,8 @@ class TapeDeckCallHandler(CallHandler):
         """
         if self._self_deck.mode == Mode.Playback:
             # playback raises an exception if one was recorded
-            return CallBypass(
-                result=self._self_deck.playback(context, channel=self._self_channel)
-            )
+            result = self._self_deck.playback(context, channel=self._self_channel)
+            return CallBypass(result)
 
     def on_call_end_exception(self, context: CallContext, ex: Exception) -> None:
         """

@@ -9,12 +9,15 @@ import uuid
 
 from pathlib import Path
 from typing import Any
+from typing import Optional
 from unittest.mock import patch
 
 from noaa_sdk import noaa
 
+from interposer import CallBypass
 from interposer import CallHandler
 from interposer import Interposer
+from interposer import isinterposed
 from interposer.example.weather import Weather
 from interposer.recorder import RecordedTestCase
 from interposer.recorder import TapeDeckCallHandler
@@ -45,6 +48,15 @@ class DoNotRecordMe(object):
 
     def times_two(self, value: int):
         return value * 2
+
+
+class RewrapCallHandler(CallHandler):
+    """
+    Tells the framework to rewrap everything it sees.
+    """
+
+    def on_call_begin(self, context: CallHandler) -> Optional[CallBypass]:
+        context.rewrap = True
 
 
 class TestRecordedTestCase(RecordedTestCase):
@@ -158,13 +170,11 @@ class TestRecordedTestCase(RecordedTestCase):
         """
         Tests the _advance logic when presented with an unpicklable call.
 
-        The code falls back to sanitizing a repr() of the call instead, which
-        is still unique enough for most cases but we lose the ability to
-        distinguish different objects of the same type based on their
-        attributes.
-
-        The call is to an Interposer(uuid) due to the patching and the
-        TapeDeck will try to pickle it, fail, and fall back to a repr.
+        The code uses a repr() of the call which is still unique enough
+        for most cases but we lose the ability to discriminate between
+        objects of the same type with different contents, however when the
+        goal is to record API interactions, what's in the API call is
+        typically only what matters as services are mostly stateless.
         """
         with patch(
             "uuid.uuid4",
@@ -174,7 +184,8 @@ class TestRecordedTestCase(RecordedTestCase):
         ):
             assert len(str(uuid.uuid4())) == 36
 
-    def test_norecord_result(self) -> None:
+    def test_selective_recording(self) -> None:
+        """ Tests ability to selectively disable recording. """
         uut = Interposer(
             DoNotRecordMe(),
             handlers=[
@@ -194,6 +205,44 @@ class TestRecordedTestCase(RecordedTestCase):
         with self.assertRaises(ValueError):
             uut.raise_exception()
         assert self.tapedeck._call_ordinals.get("test_selective_recording") == 0
+
+    def test_selective_rewrap(self) -> None:
+        """
+        Tests ability to selectively rewrap result even during playback.
+        """
+        # self.tapedeck is set up by the fixture
+        assert self.tapedeck.mode == Mode.Recording
+
+        uut = Interposer(
+            DoNotRecordMe(),
+            handlers=[
+                RewrapCallHandler(),
+                TapeDeckCallHandler(self.tapedeck, "test_selective_rewrap"),
+            ],
+        )
+
+        # is it rewrapped after recording?
+        assert isinterposed(uut.times_two(21))
+
+        self.tapedeck.close()
+        self.tapedeck.mode = Mode.Playback
+        self.tapedeck.open()
+
+        uut = Interposer(
+            DoNotRecordMe(),
+            handlers=[
+                RewrapCallHandler(),
+                TapeDeckCallHandler(self.tapedeck, "test_selective_rewrap"),
+            ],
+        )
+
+        # is it rewrapped, even during playback?
+        assert isinterposed(uut.times_two(21))
+
+        # put it back into Recording mode so the fixture can clean up
+        self.tapedeck.close()
+        self.tapedeck.mode = Mode.Recording
+        self.tapedeck.open()
 
 
 class HolderOfFineSecrets(object):
