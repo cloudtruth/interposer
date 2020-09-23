@@ -1,5 +1,6 @@
 .coverage
 .eggs/
+.idea/
 .pytest_cache/
 .tox/
 **/*.egg-info/

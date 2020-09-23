@@ -130,11 +130,28 @@ class TapeDeckCallHandler(CallHandler):
         self._self_channel = channel
         self._self_deck = deck
 
+    @staticmethod
+    def isrecorded(context: CallContext) -> bool:
+        """ Determines if the call is or should be recorded. """
+        return context.meta.get("_handler", {}).get("record", True)
+
+    @staticmethod
+    def norecord(context: CallContext) -> None:
+        """
+        By default calls are recorded; this disables it.
+
+        This should be done in on_call_begin so that it applies to both
+        playback and recording mode; if you are skipping a call in recording
+        then you want to skip playing it back too and call the actual call
+        instead.
+        """
+        context.meta.setdefault("_handler", {})["record"] = False
+
     def on_call_begin(self, context: CallContext) -> Optional[CallBypass]:
         """
         Handle a call in playback mode.
         """
-        if self._self_deck.mode == Mode.Playback:
+        if self._self_deck.mode == Mode.Playback and self.isrecorded(context):
             # playback raises an exception if one was recorded
             result = self._self_deck.playback(context, channel=self._self_channel)
             return CallBypass(result)
@@ -143,21 +160,21 @@ class TapeDeckCallHandler(CallHandler):
         """
         Record an exception.
 
-        Playback bypasses the call so we never get here on playback,
-        but an assert is placed for good measure.
+        We can end up in this code path on playback if a handler sets norecord,
+        as that instructs playback mode not to bypass the call.
         """
-        assert self._self_deck.mode == Mode.Recording
-        self._self_deck.record(context, None, ex, channel=self._self_channel)
+        if self.isrecorded(context):
+            self._self_deck.record(context, None, ex, channel=self._self_channel)
 
     def on_call_end_result(self, context: CallContext, result: Any) -> Any:
         """
         Record a result.
 
-        Playback bypasses the call so we never get here on playback,
-        but an assert is placed for good measure.
+        We can end up in this code path on playback if a handler sets norecord,
+        as that instructs playback mode not to bypass the call.
         """
-        assert self._self_deck.mode == Mode.Recording
-        self._self_deck.record(context, result, None, channel=self._self_channel)
+        if self.isrecorded(context):
+            self._self_deck.record(context, result, None, channel=self._self_channel)
         return result
 
 

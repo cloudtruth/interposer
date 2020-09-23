@@ -4,6 +4,7 @@
 # All Rights Reserved
 #
 import logging
+import math
 import os
 import pickle  # nosec
 import shelve
@@ -294,15 +295,16 @@ class TapeDeck(AbstractContextManager):
 
         Args:
             context (CallContext): the call context to store
-            result: The result from the call, as any python object that can be pickled
-            ex: The exception that occurred as a result of the call, if any
+            result (Any): The result from the call, as any python object that can be pickled
+            ex (Exception): The exception that occurred as a result of the call, if any
+            channel (str): the channel name
         """
         uniq = self._advance(context, channel)
 
         payload = Payload(context=context, result=result, ex=ex)
         try:
             self._tape[uniq] = self._redact(payload)
-        except pickle.PicklingError:
+        except (pickle.PicklingError, TypeError):
             save_call = self._reduce_call(context)
             try:
                 self._tape[uniq] = self._redact(payload)
@@ -356,11 +358,16 @@ class TapeDeck(AbstractContextManager):
         In playback mode the redacted secret is returned so the lookup finds
         the redacted context.
         """
+        if not isinstance(secret, str):
+            raise TypeError("secret must be a string")
+        if not secret:
+            raise AttributeError("secret cannot be an empty string")
+
         if self.mode == Mode.Recording:
             self.redactions.add(secret)
             return secret
         else:
-            return "^" * len(secret)
+            return self._obscured(secret)
 
     def _advance(self, context: CallContext, channel: str) -> str:
         """
@@ -421,6 +428,9 @@ class TapeDeck(AbstractContextManager):
         Common funnel for logs.
         """
         msg = f"TAPE: {category}({action}): {msg}"
+        for secret in self.redactions:
+            redacted_secret = self._redact(secret)
+            msg = msg.replace(secret, redacted_secret)
         self._logger.log(level, msg)
 
     def _log_ex(self, action: str, context: CallContext, ex: Exception) -> None:
@@ -455,6 +465,25 @@ class TapeDeck(AbstractContextManager):
         if self._logger.isEnabledFor(self.DEBUG_WITH_RESULTS):
             context.meta[self.LABEL_TAPE].pop(self.LABEL_RESULT)
 
+    def _obscured(self, secret: str) -> str:
+        """
+        Create a redaction for a secret that is based on the content
+        of the secret in order to disambiguate it from other redactions
+        in the same recording, but still be redacted.
+        """
+        wantlen = len(secret)
+        uniq = sha256(secret.encode()).hexdigest()
+        if len(uniq) < wantlen:
+            uniq *= math.ceil(wantlen / len(uniq))
+        if wantlen > 31:
+            # bookmarks make redactions easier to spot in logs
+            uniq = ":::REDACTED:::" + uniq[: wantlen - 28] + ":::REDACTED:::"
+        elif wantlen > 10:
+            uniq = ":::" + uniq[: wantlen - 6] + ":::"
+        else:
+            uniq = uniq[:wantlen]
+        return uniq
+
     def _redact(self, entity: Any, return_bytes: bool = False) -> Any:
         """
         Redacts any known secrets in an object by converting it to pickled
@@ -470,7 +499,7 @@ class TapeDeck(AbstractContextManager):
         raw = pickle.dumps(entity, protocol=self.PICKLE_PROTOCOL)
         for secret in self.redactions:
             binary_secret = secret.encode()
-            redacted_secret = ("^" * len(secret)).encode()
+            redacted_secret = self._obscured(secret).encode()
             raw = raw.replace(binary_secret, redacted_secret)
         return pickle.loads(raw) if not return_bytes else raw  # nosec
 

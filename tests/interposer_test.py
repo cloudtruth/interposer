@@ -39,6 +39,8 @@ class SimpleClass(object):
         pass
 
     def regular_call(self, arg1, arg2, kwarg1=None, kwarg2=None):
+        if arg2 == 3:
+            raise NotImplementedError("3 is not implemented")
         if arg2 != 42:
             raise SimpleError("arg2 must be 42")
         return kwarg1
@@ -94,9 +96,13 @@ class AuditingCallHandler(CallHandler):
         self.ordinal += 1
         assert len(self.calls) == self.ordinal + 1
 
-    def on_call_end_exception(self, context: CallContext, ex: Exception) -> None:
+    def on_call_end_exception(
+        self, context: CallContext, ex: Exception
+    ) -> Optional[Exception]:
         """ If we do not raise, the original exception gets re-raised. """
         self.calls[self.ordinal]["exception"] = ex
+        if isinstance(ex, NotImplementedError):
+            return ValueError("was NotImplementedError but test code changed it")
 
     def on_call_end_result(self, context: CallContext, result: Any) -> Any:
         """ Whatever we return is what gets returned to the original caller. """
@@ -117,7 +123,9 @@ class LoggingCallHandler(CallHandler):
     def on_call_begin(self, context: CallContext) -> Optional[CallBypass]:
         self.logger.debug(str(asdict(context)))
 
-    def on_call_end_exception(self, context: CallContext, ex: Exception) -> None:
+    def on_call_end_exception(
+        self, context: CallContext, ex: Exception
+    ) -> Optional[Exception]:
         self.logger.error("on_call_end_exception", exc_info=True)  # str(ex))
 
 
@@ -215,9 +223,9 @@ class InterposerTest(TestCase):
         with self.assertRaises(TypeError):
             cuut("FOOBAR")
 
-    def test_interposer_subclass(self):
+    def test_interposer_handler(self):
         """
-        Uses a simple auditing subclass to prove things out.
+        Uses a simple auditing call handler to prove things out.
         """
         handler = AuditingCallHandler()
         uut = Interposer(SimpleClass, handler)()
@@ -249,6 +257,12 @@ class InterposerTest(TestCase):
         assert isinstance(calls[2]["exception"], SimpleError)
         assert "arg2 must be 42" in str(calls[2]["exception"])
         assert "method" in str(calls[2]["type"])
+
+        # on_result_end_exception can change the exception
+        with self.assertRaises(ValueError):
+            # the code says if arg2 is 3, raise NotImplementedError
+            # but the AuditingCallHandler changes the exception
+            uut.regular_call("foo", 3, kwarg1="sam", kwarg2="dean")
 
     def test_interposer_stacking(self):
         """

@@ -83,18 +83,21 @@ class CallHandler(object):
         """
         pass
 
-    def on_call_end_exception(self, context: CallContext, ex: Exception) -> None:
+    def on_call_end_exception(
+        self, context: CallContext, ex: Exception
+    ) -> Optional[Exception]:
         """
         Invoked after the actual call is made if an exception occurred.
 
-        If this method returns, the framework will re-raise the original
-        exception thus preserving the original error behavior.
+        If this method returns an Exception, it replaces the original
+        exception.  If this method returns anything else, the original
+        exception is maintained.
 
-        To modify the behavior, raise an exception from this method.  If
-        you do this it is recommended that you save the original exception
-        inside your modified exception.
+        If none of the call handlers replace the original
+        exception then the framework will re-raise the original
+        exception thus preserving the original error context.
         """
-        pass
+        return None
 
     def on_call_end_result(self, context: CallContext, result: Any) -> Any:
         """
@@ -190,31 +193,39 @@ class Interposer(CallableObjectProxy):
         """
         context = CallContext(self.__wrapped__, args, kwargs)
 
+        # by default, a call to instantiate an object from a class definition
+        # is rewrapped so we capture the calls on the object
+        context.rewrap = inspect.isclass(self.__wrapped__)
+
         # see if a handler wants to bypass the call
         for handler in self._self_handlers:
             bypass = handler.on_call_begin(context)
             if bypass:
-                if inspect.isclass(self.__wrapped__) or context.rewrap:
-                    # returning a recorded result of a __call__ so wrap the object
-                    return Interposer(bypass.result, self._self_handlers)
+                if context.rewrap:
+                    # FIXME: derived types cannot have additional arguments
+                    return type(self)(bypass.result, self._self_handlers)
                 else:
                     return bypass.result
 
-        # creating an object from a wrapped class also wraps the object
-        rewrap = inspect.isclass(self.__wrapped__)
+        # nope, so make the actual call
         try:
-            # the actual call
             result = super().__call__(*args, **kwargs)
         except Exception as ex:
+            orig_ex = ex
             for handler in self._self_handlers:
-                handler.on_call_end_exception(context, ex)
-            raise  # none of them raised, so we can reraise to preserve error
+                repl = handler.on_call_end_exception(context, ex)
+                if isinstance(repl, Exception):
+                    ex = repl
+            if ex is orig_ex:
+                raise  # re-raise the original exception
+            else:
+                raise ex  # raise the replacement exception
         for handler in self._self_handlers:
             result = handler.on_call_end_result(context, result)
-            rewrap = rewrap or context.rewrap  # selective rewrap
 
-        if rewrap:
-            result = Interposer(result, self._self_handlers)
+        if context.rewrap:
+            # FIXME: derived types cannot have additional arguments
+            result = type(self)(result, self._self_handlers)
         return result
 
     def __getattr__(self, name: str) -> Any:
@@ -230,7 +241,8 @@ class Interposer(CallableObjectProxy):
         attr = super().__getattr__(name)
         wrap = inspect.isbuiltin(attr) or inspect.getmodule(attr)
         if wrap:
-            attr = Interposer(attr, self._self_handlers)
+            # FIXME: derived types cannot have additional arguments
+            attr = type(self)(attr, self._self_handlers)
         return attr
 
 

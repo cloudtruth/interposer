@@ -172,16 +172,52 @@ class TapeDeckTest(TestCase):
         finally:
             TapeDeck.EARLIEST_FILE_FORMAT_SUPPORTED = save
 
+    def test_redacted_obscured(self):
+        """
+        Tests logic that makes an obscure but unique redaction string.
+        """
+        uut = TapeDeck(self.datadir / "recording", Mode.Playback)
+
+        with self.assertRaises(TypeError):
+            uut.redact(None)
+        with self.assertRaises(TypeError):
+            uut.redact(42)
+        with self.assertRaises(AttributeError):
+            uut.redact("")
+
+        for i in range(1, 512):
+            assert len(uut._obscured("*" * i)) == i
+
+        token = str(uuid.uuid4())
+        token2 = str(uuid.uuid4())
+
+        # tokens up to length 10 are just hash
+        assert uut._obscured("A") != uut._obscured("Z")
+        assert ":" not in uut._obscured("123456789")
+
+        # tokens up to length 32 have small bookmarks for logging standout
+        foo = uut._obscured("*" * 31)
+        assert foo.startswith(":::")
+        assert foo.endswith(":::")
+        assert ":" not in foo[3:-3]
+
+        # longer secrets have :::REDACTED::: bookmarks and still unique
+        bar = uut._obscured(token)
+        assert bar.startswith(":::REDACTED:::")
+        assert bar.endswith(":::REDACTED:::")
+        assert ":" not in bar[14:-14]
+
+        assert uut._obscured(token) != uut._obscured(token2)
+
     def test_recording_secrets(self):
         """ Tests automatic redaction of known secrets and use in playback """
         token = str(uuid.uuid4())
-        redacted_token = "^" * 36
         keeper = KeeperOfFineSecrets(token)
 
         # pretend someone created an object and made two calls where one succeeds and one raises
 
         with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
-            uut.redactions.add(token)
+            uut.redact(token)
             uut.record(
                 CallContext(call=KeeperOfFineSecrets, args=(token,), kwargs={}),
                 keeper,
@@ -199,6 +235,7 @@ class TapeDeckTest(TestCase):
         # now during playback see everything with a secret (token) has been redacted!
 
         with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
+            redacted_token = uut.redact(token)
             redacted_keeper = uut.playback(
                 CallContext(call=KeeperOfFineSecrets, args=(redacted_token,), kwargs={})
             )
