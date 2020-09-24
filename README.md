@@ -302,3 +302,23 @@ mode, the secret is passed to the tape deck for redaction.  This means:
 In playback mode, call `self.redact(secret)` and it will return a redacted
 string for you to use in place of the secret.  This allows the playback call
 signatures to match the recorded call signatures.
+
+## Misaligned Playback
+
+If code or libraries change, the recording may no longer match the call
+patterns.  When you see a `RecordedCallNotFoundError` you should try to
+regenerate your recording.  If this does not work, there is likely a piece
+of information in the recording that is not idempotent, such as a timestamp
+or a uuid.
+
+The easiest way to identify this is to record and then playback, scraping the
+log messages into two files, and comparing them.  Here is an example:
+
+    $ RECORDING=1 tox -e debug <testname> -- --pdb -s \
+      -o log_cli=True -o log_cli_level=7 | grep TAPE | tee /tmp/record.txt
+    ...
+    $ tox -e debug <testname> -- --pdb -s \
+      -o log_cli=True -o log_cli_level=7 | grep TAPE | tee /tmp/playback.txt
+    ...
+
+When compared side-by-side, it is easier to see what data changed.
