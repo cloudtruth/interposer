@@ -21,7 +21,6 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
-from typing import Set
 
 import yaml
 
@@ -172,13 +171,11 @@ class TapeDeck(AbstractContextManager):
         self.deck = deck
         self.file_format = None
         self.mode = mode
-        self.redactions: Set[str] = set()
-
-        self._logger = logging.getLogger(__name__)
 
         # call ordinal key (channel name) and value (ordinal number)
         self._call_ordinals: Dict[str, int] = {}
-
+        self._logger = logging.getLogger(__name__)
+        self._redactions: Dict[str, str] = dict()
         # the open file resource
         self._tape = None
 
@@ -233,6 +230,8 @@ class TapeDeck(AbstractContextManager):
         if self._tape:
             raise TapeDeckOpenError()
 
+        self._reset()
+
         if self.mode == Mode.Playback:
             self._tape = shelve.open(
                 str(self.deck), flag="r", protocol=self.PICKLE_PROTOCOL
@@ -252,12 +251,6 @@ class TapeDeck(AbstractContextManager):
             )
             self._tape[self.LABEL_FILE_FORMAT] = self.CURRENT_FILE_FORMAT
             self.file_format = self.CURRENT_FILE_FORMAT
-
-        # ensure if close() then open() is called we reset the ordinals to zero
-        self._call_ordinals = dict()
-        self.redactions = set()
-
-        self._call_ordinals = {}
 
         self._log(
             logging.DEBUG,
@@ -281,6 +274,8 @@ class TapeDeck(AbstractContextManager):
                 "file",
                 f"{self.deck} for {self.mode} using file format {self.file_format}",
             )
+
+        self._reset()
 
     def record(
         self,
@@ -348,29 +343,45 @@ class TapeDeck(AbstractContextManager):
             self._log_ex("playback", context, payload.ex)
             raise payload.ex
 
-    def redact(self, secret: str) -> str:
+    def redact(self, secret: str, replacement: str = "*") -> str:
         """
         Auto-track secrets for redaction.
 
-        In recording mode this returns the secret and makes sure the secret
-        never makes it into the recording; instead a redacted version does,
-        which is done before call contexts get hashed so the hashed context
-        is of the redacted context.  The results and exceptions are also
-        redacted before storage.
+        Tracks the secret for redaction of content being written.  For example
+        if a secret exists inside an object call result, it will be
+        overwritten with an equal length string containing the replacement,
+        wrapping around if necessary.  The replacement can be a single
+        character or a string which will get duplicated (or truncated) to
+        fit to the required size.
 
-        In playback mode the redacted secret is returned so the lookup finds
-        the redacted context.
+        It is recommended that for each secret a different replacement is
+        used, since equal length secrets with the same replacement will yield
+        equal redacted secrets.
+
+        During recording this method updates the redaction dict internally
+        and returns the original secret (so the remainder of the recording
+        can proceed), however call signatures will have the replacement in
+        place of the secret.  In playback mode when called, this method
+        will return the replacement that was used during recording so the
+        call can be found.
         """
         if not isinstance(secret, str):
             raise TypeError("secret must be a string")
+        if not isinstance(replacement, str):
+            raise TypeError("replacement must be a string")
         if not secret:
             raise AttributeError("secret cannot be an empty string")
+        if not replacement:
+            raise AttributeError("replacement cannot be an empty string")
+
+        wantlen = len(secret)
+        obfu = (replacement * math.ceil(wantlen / len(replacement)))[:wantlen]
 
         if self.mode == Mode.Recording:
-            self.redactions.add(secret)
+            self._redactions[secret] = obfu
             return secret
         else:
-            return self._obscured(secret)
+            return obfu
 
     def _advance(self, context: CallContext, channel: str) -> str:
         """
@@ -482,9 +493,8 @@ class TapeDeck(AbstractContextManager):
         Common funnel for logs.
         """
         msg = f"TAPE: {category}({action}): {msg}"
-        for secret in self.redactions:
-            redacted_secret = self._redact(secret)
-            msg = msg.replace(secret, redacted_secret)
+        for secret, replacement in self._redactions.items():
+            msg = msg.replace(secret, replacement)
         self._logger.log(level, msg)
 
     def _log_ex(self, action: str, context: CallContext, ex: Exception) -> None:
@@ -519,25 +529,6 @@ class TapeDeck(AbstractContextManager):
         if self._logger.isEnabledFor(self.DEBUG_WITH_RESULTS):
             context.meta[self.LABEL_TAPE].pop(self.LABEL_RESULT)
 
-    def _obscured(self, secret: str) -> str:
-        """
-        Create a redaction for a secret that is based on the content
-        of the secret in order to disambiguate it from other redactions
-        in the same recording, but still be redacted.
-        """
-        wantlen = len(secret)
-        uniq = sha256(secret.encode()).hexdigest()
-        if len(uniq) < wantlen:
-            uniq *= math.ceil(wantlen / len(uniq))
-        if wantlen > 31:
-            # bookmarks make redactions easier to spot in logs
-            uniq = ":::REDACTED:::" + uniq[: wantlen - 28] + ":::REDACTED:::"
-        elif wantlen > 10:
-            uniq = ":::" + uniq[: wantlen - 6] + ":::"
-        else:
-            uniq = uniq[:wantlen]
-        return uniq
-
     def _redact(self, entity: Any, return_bytes: bool = False) -> Any:
         """
         Redacts any known secrets in an object by converting it to pickled
@@ -545,16 +536,14 @@ class TapeDeck(AbstractContextManager):
 
         This is used before we hash contexts and before we store results to
         make sure there are no secrets in the recording.  The secrets must
-        be fed to us from the consumer (self.redactions).
+        be fed to us from the consumer (self._redactions).
 
         Raises:
             PicklingError if something in the context cannot be pickled.
         """
         raw = pickle.dumps(entity, protocol=self.PICKLE_PROTOCOL)
-        for secret in self.redactions:
-            binary_secret = secret.encode()
-            redacted_secret = self._obscured(secret).encode()
-            raw = raw.replace(binary_secret, redacted_secret)
+        for secret, replacement in self._redactions.items():
+            raw = raw.replace(secret.encode(), replacement.encode())
         return pickle.loads(raw) if not return_bytes else raw  # nosec
 
     def _reduce_call(self, context: CallContext) -> Callable:
@@ -581,3 +570,9 @@ class TapeDeck(AbstractContextManager):
         result = context.call
         context.call = sig
         return result
+
+    def _reset(self) -> None:
+        """ Clean out stuff at open and close. """
+        self.file_format = None
+        self._call_ordinals = dict()
+        self._redactions = dict()

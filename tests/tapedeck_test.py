@@ -172,11 +172,11 @@ class TapeDeckTest(TestCase):
         finally:
             TapeDeck.EARLIEST_FILE_FORMAT_SUPPORTED = save
 
-    def test_redacted_obscured(self):
+    def test_redact(self):
         """
         Tests logic that makes an obscure but unique redaction string.
         """
-        uut = TapeDeck(self.datadir / "recording", Mode.Playback)
+        uut = TapeDeck(self.datadir / "recording", Mode.Recording)
 
         with self.assertRaises(TypeError):
             uut.redact(None)
@@ -184,30 +184,32 @@ class TapeDeckTest(TestCase):
             uut.redact(42)
         with self.assertRaises(AttributeError):
             uut.redact("")
+        with self.assertRaises(TypeError):
+            uut.redact("foo", replacement=None)
+        with self.assertRaises(TypeError):
+            uut.redact("foo", replacement=42)
+        with self.assertRaises(AttributeError):
+            uut.redact("foo", replacement="")
 
-        for i in range(1, 512):
-            assert len(uut._obscured("*" * i)) == i
+        assert uut.redact("foo") == "foo"  # recording mode
+        assert uut._redactions.get("foo") == "***"  # default
 
-        token = str(uuid.uuid4())
-        token2 = str(uuid.uuid4())
+        assert uut.redact("foo", replacement="#") == "foo"  # recording mode
+        assert uut._redactions.get("foo") == "###"  # default
 
-        # tokens up to length 10 are just hash
-        assert uut._obscured("A") != uut._obscured("Z")
-        assert ":" not in uut._obscured("123456789")
+        assert uut.redact("foo", replacement="BARSAM") == "foo"  # recording mode
+        assert uut._redactions.get("foo") == "BAR"  # default
 
-        # tokens up to length 32 have small bookmarks for logging standout
-        foo = uut._obscured("*" * 31)
-        assert foo.startswith(":::")
-        assert foo.endswith(":::")
-        assert ":" not in foo[3:-3]
+        assert (
+            uut.redact("fudge brownie", replacement="BARS") == "fudge brownie"
+        )  # recording mode
+        assert uut._redactions.get("fudge brownie") == "BARSBARSBARSB"  # default
 
-        # longer secrets have :::REDACTED::: bookmarks and still unique
-        bar = uut._obscured(token)
-        assert bar.startswith(":::REDACTED:::")
-        assert bar.endswith(":::REDACTED:::")
-        assert ":" not in bar[14:-14]
+        uut.mode = Mode.Playback
 
-        assert uut._obscured(token) != uut._obscured(token2)
+        assert (
+            uut.redact("fudge brownie", replacement="BARS") == "BARSBARSBARSB"
+        )  # playback mode
 
     def test_recording_secrets(self):
         """ Tests automatic redaction of known secrets and use in playback """

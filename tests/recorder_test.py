@@ -282,15 +282,15 @@ class SecretsTestCase(RecordedTestCase):
         Delete the recording file since we tested both modes in one test.
         """
         datafile = Path(str(cls.tapedeck.deck) + ".gz")
-        redactions = cls.tapedeck.redactions
+        redactions = cls.tapedeck._redactions
         super().tearDownClass()
         if datafile.exists():
             with gzip.open(datafile, "rb") as fin:
                 raw = fin.read()
-                for secret in redactions:
+                for secret, replacement in redactions.items():
                     assert (
                         secret.encode() not in raw
-                    ), "a secret leaked into the recording"
+                    ), "a secret leaked into the recording!"
             datafile.unlink()
         os.environ.pop("RECORDING")
 
@@ -315,25 +315,22 @@ class SecretsTestCase(RecordedTestCase):
         # post-processing redaction list and after the recording file is closed
         # the secrets get redacted; in playback mode this redacts it immediately
         # so the playback matches the recording
-        assert not self.tapedeck.redactions
-        uut = cls(self.redact(self.token))
-        assert self.tapedeck.redactions
-        assert uut.get_token() == self.redact(self.token)
+        assert not self.tapedeck._redactions
+        uut = cls(self.redact(self.token, replacement="TOKEN"))
+        assert self.tapedeck._redactions
+        assert uut.get_token() == self.redact(self.token, replacement="TOKEN")
         assert self.redact(self.token) == self.token
 
         self.tapedeck.close()  # applies redaction to recording
         self.tapedeck.mode = Mode.Playback
         self.tapedeck.open()
 
-        assert not self.tapedeck.redactions
-        uut = cls(self.redact(self.token))
-        foo = self.redact(self.token)
-        assert foo.startswith(":::REDACTED:::")
-        assert foo.endswith(":::REDACTED:::")
-        assert len(foo) == len(self.token)
-        assert ":" not in foo[14:-14]
+        assert not self.tapedeck._redactions
+        uut = cls(self.redact(self.token, replacement="TOKEN"))
+        foo = self.redact(self.token, replacement="TOKEN")
+        assert foo == "TOKENTOKENTOKENTOKENTOKENTOKENTOKENT"
 
-        # most importantly, the value that was recorded was also redacted
+        # most importantly, the object initializer argument was redacted
         assert uut.get_token() == foo
         with self.assertRaises(RecordedCallNotFoundError):
             uut.get_token()
