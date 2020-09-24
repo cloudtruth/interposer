@@ -6,7 +6,6 @@
 import difflib
 import io
 import logging
-import math
 import pickle  # nosec
 import pickletools  # nosec
 import shelve
@@ -138,14 +137,15 @@ class TapeDeck(AbstractContextManager):
       -  4: ordinal counting of calls for linear playback
       -  5: support datetime and enum in argument lists
       -  6: major refactor rendered previous recordings unusable
+      -  7: added original secret length redaction mapping
 
     NOTE: We are expressly not using `dill` because it stores class
           definitions and as a result would not actually catch errors
           when a third party library is updated.
     """
 
-    CURRENT_FILE_FORMAT = 6
-    EARLIEST_FILE_FORMAT_SUPPORTED = 6
+    CURRENT_FILE_FORMAT = 7
+    EARLIEST_FILE_FORMAT_SUPPORTED = 7
     PICKLE_PROTOCOL = 4
 
     LABEL_CHANNEL = "channel"
@@ -343,45 +343,56 @@ class TapeDeck(AbstractContextManager):
             self._log_ex("playback", context, payload.ex)
             raise payload.ex
 
-    def redact(self, secret: str, replacement: str = "*") -> str:
+    def redact(self, secret: str, identifier: str) -> str:
         """
         Auto-track secrets for redaction.
 
-        Tracks the secret for redaction of content being written.  For example
-        if a secret exists inside an object call result, it will be
-        overwritten with an equal length string containing the replacement,
-        wrapping around if necessary.  The replacement can be a single
-        character or a string which will get duplicated (or truncated) to
-        fit to the required size.
+        Tracks the secret for redaction of content being written to the file.
+        If a secret exists inside an object call argument, result, or exception
+        then it will be overwritten with something based on the identifier.
 
-        It is recommended that for each secret a different replacement is
-        used, since equal length secrets with the same replacement will yield
-        equal redacted secrets.
+        Each redacted secret needs a unique identifier.
 
-        During recording this method updates the redaction dict internally
-        and returns the original secret (so the remainder of the recording
-        can proceed), however call signatures will have the replacement in
-        place of the secret.  In playback mode when called, this method
-        will return the replacement that was used during recording so the
-        call can be found.
+        We redact the secret by overwriting it in a pickle raw stream so
+        it cannot change sizes.  We store the identifier and the original
+        secret length in the database, and pad the identifier out to or clip
+        it to the secret length.
+
+        During recording this method returns the original secret.  The caller
+        is expected to use their original secret during recording.
+
+        During playback this method returns the replacement that was used during
+        recording for the given identifier.  The caller is expected to use what
+        gets returned as the secret so the playback calls align with the
+        recording.
         """
         if not isinstance(secret, str):
             raise TypeError("secret must be a string")
-        if not isinstance(replacement, str):
-            raise TypeError("replacement must be a string")
+        if not isinstance(identifier, str):
+            raise TypeError("identifier must be a string")
         if not secret:
             raise AttributeError("secret cannot be an empty string")
-        if not replacement:
-            raise AttributeError("replacement cannot be an empty string")
+        if not identifier:
+            raise AttributeError("identifier cannot be an empty string")
 
-        wantlen = len(secret)
-        obfu = (replacement * math.ceil(wantlen / len(replacement)))[:wantlen]
+        key = f"_redact_{identifier}"
 
         if self.mode == Mode.Recording:
-            self._redactions[secret] = obfu
+            if self._tape.get(key):
+                raise AttributeError(
+                    f"{identifier} has already been used to redact a secret"
+                )
+            secretlen = len(secret)
+            self._redactions[secret] = (identifier + ("_" * secretlen))[:secretlen]
+            self._tape[key] = secretlen
             return secret
         else:
-            return obfu
+            secretlen = self._tape.get(key)
+            if not secretlen:
+                raise AttributeError(
+                    f"{identifier} was not used during recording to redact a secret"
+                )
+            return (identifier + ("_" * secretlen))[:secretlen]
 
     def _advance(self, context: CallContext, channel: str) -> str:
         """

@@ -176,52 +176,58 @@ class TapeDeckTest(TestCase):
         """
         Tests logic that makes an obscure but unique redaction string.
         """
-        uut = TapeDeck(self.datadir / "recording", Mode.Recording)
+        with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
+            with self.assertRaises(TypeError):
+                uut.redact(None, "foo")
+            with self.assertRaises(TypeError):
+                uut.redact(42, "foo")
+            with self.assertRaises(AttributeError):
+                uut.redact("", "foo")
+            with self.assertRaises(TypeError):
+                uut.redact("foo", None)
+            with self.assertRaises(TypeError):
+                uut.redact("foo", 42)
+            with self.assertRaises(AttributeError):
+                uut.redact("foo", "")
 
-        with self.assertRaises(TypeError):
-            uut.redact(None)
-        with self.assertRaises(TypeError):
-            uut.redact(42)
-        with self.assertRaises(AttributeError):
-            uut.redact("")
-        with self.assertRaises(TypeError):
-            uut.redact("foo", replacement=None)
-        with self.assertRaises(TypeError):
-            uut.redact("foo", replacement=42)
-        with self.assertRaises(AttributeError):
-            uut.redact("foo", replacement="")
+            # identifier longer than secret gets clipped
+            assert uut.redact("123456789", "THIS_IS_A_REDACTED_COUNT") == "123456789"
+            assert uut._redactions.get("123456789") == "THIS_IS_A"
 
-        assert uut.redact("foo") == "foo"  # recording mode
-        assert uut._redactions.get("foo") == "***"  # default
+            # identifier shorter than secret gets padded
+            assert uut.redact("candycane", "THIS") == "candycane"
+            assert uut._redactions.get("candycane") == "THIS_____"
 
-        assert uut.redact("foo", replacement="#") == "foo"  # recording mode
-        assert uut._redactions.get("foo") == "###"  # default
+            with self.assertRaises(AttributeError):
+                # each identifier must be unique
+                uut.redact("crush", "THIS")
 
-        assert uut.redact("foo", replacement="BARSAM") == "foo"  # recording mode
-        assert uut._redactions.get("foo") == "BAR"  # default
-
-        assert (
-            uut.redact("fudge brownie", replacement="BARS") == "fudge brownie"
-        )  # recording mode
-        assert uut._redactions.get("fudge brownie") == "BARSBARSBARSB"  # default
-
-        uut.mode = Mode.Playback
-
-        assert (
-            uut.redact("fudge brownie", replacement="BARS") == "BARSBARSBARSB"
-        )  # playback mode
+        with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
+            # playback caller may not know the secret but does know the identifier
+            assert uut.redact("foo", "THIS_IS_A_REDACTED_COUNT") == "THIS_IS_A"
+            assert uut.redact("foo", "THIS") == "THIS_____"
 
     def test_recording_secrets(self):
         """ Tests automatic redaction of known secrets and use in playback """
         token = str(uuid.uuid4())
+        token2 = str(uuid.uuid4())
         keeper = KeeperOfFineSecrets(token)
 
         # pretend someone created an object and made two calls where one succeeds and one raises
 
         with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
-            uut.redact(token)
+            use_token = uut.redact(token, "REDACTED_SMALLER_THAN_ORIGINAL")
+            assert use_token == token
+            use_token2 = uut.redact(
+                token2, "REDACTED_LARGER_THAN_ORIGINAL_AND_THAT_IS_OKAY"
+            )
+            assert use_token2 == token2
             uut.record(
-                CallContext(call=KeeperOfFineSecrets, args=(token,), kwargs={}),
+                CallContext(
+                    call=KeeperOfFineSecrets,
+                    args=(use_token,),
+                    kwargs={"other": use_token2},
+                ),
                 keeper,
                 None,
             )
@@ -234,12 +240,32 @@ class TapeDeckTest(TestCase):
                 ValueError(token),
             )
 
+            # a secret redaction identifier can only be used once in a recording
+            with self.assertRaises(AttributeError):
+                uut.redact("foo", "REDACTED_SMALLER_THAN_ORIGINAL")
+
         # now during playback see everything with a secret (token) has been redacted!
 
         with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
-            redacted_token = uut.redact(token)
+            # during playback the secret passed in may not be the same as during recording
+            # however since it was redacted, the identifier is what's important
+            redacted_token = uut.redact(
+                "not-the-original-token", "REDACTED_SMALLER_THAN_ORIGINAL"
+            )
+            assert redacted_token != token
+            # the redaction will have the same length as the original secret
+            assert len(redacted_token) == len(token)
+            redacted_token2 = uut.redact(
+                "not-the-original-token2",
+                "REDACTED_LARGER_THAN_ORIGINAL_AND_THAT_IS_OKAY",
+            )
+            assert redacted_token2 != token2
             redacted_keeper = uut.playback(
-                CallContext(call=KeeperOfFineSecrets, args=(redacted_token,), kwargs={})
+                CallContext(
+                    call=KeeperOfFineSecrets,
+                    args=(redacted_token,),
+                    kwargs={"other": redacted_token2},
+                )
             )
             assert redacted_keeper.get_token() == redacted_token
             assert (
@@ -255,6 +281,10 @@ class TapeDeckTest(TestCase):
             assert token not in str(ex.exception)
             assert redacted_token in str(ex.exception)
             uut.dump(self.datadir / "dump.yaml")
+
+            # this identifier was never used during recording
+            with self.assertRaises(AttributeError):
+                uut.redact("foo", "NEVER_USED_DURING_RECORDING")
 
         # now with a misaligned playback
 
