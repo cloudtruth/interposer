@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2020-09-24
+
+### Changed
+
+- Honor changes call handlers make to args, kwargs in on_call_begin
+  so those changes make it to the actual call.
+
 ## [0.8.0] - 2020-09-21
 
 This was a major refactoring to allow for custom call handlers.

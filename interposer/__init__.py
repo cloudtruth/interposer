@@ -209,7 +209,7 @@ class Interposer(CallableObjectProxy):
 
         # nope, so make the actual call
         try:
-            result = super().__call__(*args, **kwargs)
+            result = super().__call__(*context.args, **context.kwargs)
         except Exception as ex:
             orig_ex = ex
             for handler in self._self_handlers:

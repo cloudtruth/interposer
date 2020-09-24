@@ -14,7 +14,7 @@ name = "interposer"
 description = "A code intercept wrapper with recording and playback options."
 major = 0
 minor = 8
-patch = 0
+patch = 1
 
 # Everything below should be cookie-cutter
 
