@@ -3,10 +3,12 @@
 # Copyright (C) 2019 - 2020 Tuono, Inc.
 # All Rights Reserved
 #
+import difflib
+import io
 import logging
 import math
-import os
 import pickle  # nosec
+import pickletools  # nosec
 import shelve
 
 from contextlib import AbstractContextManager
@@ -334,6 +336,7 @@ class TapeDeck(AbstractContextManager):
         uniq = self._advance(context, channel)
         recorded = self._tape.get(uniq, RecordedCallNotFoundError(context))
         if isinstance(recorded, RecordedCallNotFoundError):
+            self._forensics(context, channel)
             raise recorded
 
         payload = recorded
@@ -398,27 +401,78 @@ class TapeDeck(AbstractContextManager):
         our_meta[self.LABEL_HASH] = result
         return result
 
+    def _forensics(self, context: CallContext, channel: str) -> None:
+        """
+        Perform forensic analysis of RecordedCallNotFoundError and log:
+
+        - The recorded pickled context (stored in _call_<channel>_<ordinal>)
+        - The playback pickled context
+        - The difference
+        """
+        ordinal = self._call_ordinals[channel]
+
+        recorded_raw = self._tape.get(f"_call_{channel}_{ordinal}")
+        playback_call = self._reduce_call(context)
+        try:
+            playback_raw = self._redact(context, return_bytes=True)
+        finally:
+            context.call = playback_call
+
+        assert recorded_raw != playback_raw, "why did we get RecordedCallNotFoundError?"
+
+        if recorded_raw is not None:
+            recorded_io = io.StringIO()
+            pickletools.dis(recorded_raw, out=recorded_io)
+            recorded_transcript = recorded_io.getvalue()
+            self._log(
+                logging.DEBUG,
+                "mismatch",
+                "recorded",
+                f"RECORDED CALL IN CHANNEL {channel} ORDINAL {ordinal}:\n\n{recorded_transcript}",
+            )
+        else:
+            self._log(
+                logging.DEBUG,
+                "mismatch",
+                "recorded",
+                f"NO RECORDED CALL IN CHANNEL {channel} ORDINAL {ordinal}",
+            )
+
+        playback_io = io.StringIO()
+        pickletools.dis(playback_raw, out=playback_io)
+        playback_transcript = playback_io.getvalue()
+
+        self._log(
+            logging.DEBUG,
+            "mismatch",
+            "playback",
+            f"PLAYBACK CALL IN CHANNEL {channel} ORDINAL {ordinal}:\n\n{playback_transcript}",
+        )
+
+        if recorded_raw and playback_raw:
+            differences = list(
+                difflib.context_diff(
+                    recorded_transcript.splitlines(), playback_transcript.splitlines()
+                )
+            )
+            self._log(logging.DEBUG, "mismatch", "difference", "\n".join(differences))
+
     def _hickle(self, context: CallContext) -> str:
         """
-        Hash a context using a redacted pickle.
+        Hash a context using a redacted pickle.  In addition we stuff
+        the original redacted call into the database so we can compare
+        that call's raw content against a playback call to see why they
+        are different.
 
         Raises:
             PicklingError if something in the context cannot be pickled.
         """
         raw = self._redact(context, return_bytes=True)
-        # if TAPEDECKDEBUG is in the environment we dump out the raw pickles so
-        # we can use "python3 -m pickletools <file>" to dump out the actual
-        # raw pickle content and determine why there was a mismatch; to be used
-        # when playback raises RecordedCallNotFoundError
-        if "TAPEDECKDEBUG" in os.environ and context:
-            calldir = Path(str(self.deck) + "-calls")
-            calldir.mkdir(exist_ok=True)
+        if self.mode == Mode.Recording:
             our_meta = context.meta[self.LABEL_TAPE]
             channel = our_meta[self.LABEL_CHANNEL]
             ordinal = our_meta[self.LABEL_ORDINAL]
-            fname = f"{('record' if self.mode == Mode.Recording else 'playback')}-{channel}-{ordinal}.pickle"
-            with (calldir / fname).open("wb") as fp:
-                fp.write(raw)
+            self._tape[f"_call_{channel}_{ordinal}"] = raw
         uniq = sha256(raw)
         result = uniq.hexdigest()
         return result

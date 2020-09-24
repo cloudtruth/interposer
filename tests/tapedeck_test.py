@@ -253,3 +253,13 @@ class TapeDeckTest(TestCase):
             assert token not in str(ex.exception)
             assert redacted_token in str(ex.exception)
             uut.dump(self.datadir / "dump.yaml")
+
+        # now with a misaligned playback
+
+        with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
+            with self.assertRaises(RecordedCallNotFoundError):
+                uut.playback(
+                    CallContext(
+                        call=KeeperOfFineSecrets, args=(), kwargs={"sam": "dean"}
+                    )
+                )
