@@ -378,19 +378,24 @@ class TapeDeck(AbstractContextManager):
         key = f"_redact_{identifier}"
 
         if self.mode == Mode.Recording:
+            secretlen = len(secret)
+            redacted = (identifier + ("_" * secretlen))[:secretlen]
+            if self._redactions.get(secret) == redacted:
+                # calling it more than once for the same secret and ID is ok
+                return secret
+
             if self._tape.get(key):
                 raise AttributeError(
-                    f"{identifier} has already been used to redact a secret"
+                    f"{identifier} has already been used to redact another secret"
                 )
-            secretlen = len(secret)
-            self._redactions[secret] = (identifier + ("_" * secretlen))[:secretlen]
+            self._redactions[secret] = redacted
             self._tape[key] = secretlen
             return secret
         else:
             secretlen = self._tape.get(key)
             if not secretlen:
                 raise AttributeError(
-                    f"{identifier} was not used during recording to redact a secret"
+                    f"{identifier} was not used during recording to redact this secret"
                 )
             return (identifier + ("_" * secretlen))[:secretlen]
 

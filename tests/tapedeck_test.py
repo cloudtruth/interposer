@@ -243,6 +243,8 @@ class TapeDeckTest(TestCase):
             # a secret redaction identifier can only be used once in a recording
             with self.assertRaises(AttributeError):
                 uut.redact("foo", "REDACTED_SMALLER_THAN_ORIGINAL")
+            # but if the secret is the same that is not an error
+            assert uut.redact(token, "REDACTED_SMALLER_THAN_ORIGINAL") == token
 
         # now during playback see everything with a secret (token) has been redacted!
 
