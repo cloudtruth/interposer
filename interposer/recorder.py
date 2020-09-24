@@ -102,18 +102,21 @@ class RecordedTestCase(TestCase):
 
         super().tearDownClass()
 
-    def redact(self, secret: str, replacement: str = "*") -> str:
+    def redact(self, secret: str, identifier: str) -> str:
         """
-        Redact a secret in playback mode, and keep track of the secret in
-        recording mode.  This allows tests to use secrets quite normally.
-        Callers just have to remember to run secrets through redact().
+        In recording mode, pass in the secret and a unique identifier that
+        will be present during playback that identifies the secret.  The
+        content in the recording will be redacted using the identifier.
 
-        It is recommended you provide a unique replacment string (it does
-        not need to be the same length as the secret), for each secret
-        to disambiguate them in the same run, especially for secrets of the
-        same length.
+        In playback mode, pass in anything plus the same unique identifier
+        that was present during recording and the redaction will be returned
+        for you to use in place of the secret.  Then your call will align
+        with the recording's call, even though you did not use the same
+        actual secret.
+
+        Each identifier for a secret must be unique.
         """
-        return self.tapedeck.redact(secret, replacement=replacement)
+        return self.tapedeck.redact(secret, identifier)
 
 
 class TapeDeckCallHandler(CallHandler):

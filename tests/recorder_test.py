@@ -316,19 +316,18 @@ class SecretsTestCase(RecordedTestCase):
         # the secrets get redacted; in playback mode this redacts it immediately
         # so the playback matches the recording
         assert not self.tapedeck._redactions
-        uut = cls(self.redact(self.token, replacement="TOKEN"))
+        uut = cls(self.redact(self.token, "TOKEN"))
         assert self.tapedeck._redactions
-        assert uut.get_token() == self.redact(self.token, replacement="TOKEN")
-        assert self.redact(self.token) == self.token
+        assert uut.get_token() == self.redact(self.token, "TOKEN2")
 
         self.tapedeck.close()  # applies redaction to recording
         self.tapedeck.mode = Mode.Playback
         self.tapedeck.open()
 
         assert not self.tapedeck._redactions
-        uut = cls(self.redact(self.token, replacement="TOKEN"))
-        foo = self.redact(self.token, replacement="TOKEN")
-        assert foo == "TOKENTOKENTOKENTOKENTOKENTOKENTOKENT"
+        uut = cls(self.redact("foo", "TOKEN"))
+        foo = self.redact("foo", "TOKEN")
+        assert foo == "TOKEN_______________________________"
 
         # most importantly, the object initializer argument was redacted
         assert uut.get_token() == foo
