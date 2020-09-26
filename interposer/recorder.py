@@ -79,6 +79,8 @@ class RecordedTestCase(TestCase):
                     fout.write(fin.read())
         else:
             recordings.mkdir(parents=True, exist_ok=True)
+            if recording.exists():
+                recording.unlink()
 
         cls.tapedeck = TapeDeck(recording, mode)
         cls.tapedeck.open()
