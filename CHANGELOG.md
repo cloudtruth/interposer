@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+## [0.9.2] - 2020-10-19
+
+### Changed
+
+- Allow redaction of bytes.
+
+## [0.9.1] - 2020-09-26
+
+### Changed
+
 - When starting a recording, remove any existing uncompressed file.
 
 ## [0.9.0] - 2020-09-24

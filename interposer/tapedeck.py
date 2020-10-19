@@ -20,6 +20,7 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import Optional
+from typing import Union
 
 import yaml
 
@@ -175,7 +176,7 @@ class TapeDeck(AbstractContextManager):
         # call ordinal key (channel name) and value (ordinal number)
         self._call_ordinals: Dict[str, int] = {}
         self._logger = logging.getLogger(__name__)
-        self._redactions: Dict[str, str] = dict()
+        self._redactions: Dict[Union[str, bytes], str] = dict()
         # the open file resource
         self._tape = None
 
@@ -343,7 +344,7 @@ class TapeDeck(AbstractContextManager):
             self._log_ex("playback", context, payload.ex)
             raise payload.ex
 
-    def redact(self, secret: str, identifier: str) -> str:
+    def redact(self, secret: Union[str, bytes], identifier: str) -> str:
         """
         Auto-track secrets for redaction.
 
@@ -366,14 +367,14 @@ class TapeDeck(AbstractContextManager):
         gets returned as the secret so the playback calls align with the
         recording.
         """
-        if not isinstance(secret, str):
-            raise TypeError("secret must be a string")
+        if not isinstance(secret, (str, bytes)):
+            raise TypeError("secret must be a string or bytes")
         if not isinstance(identifier, str):
             raise TypeError("identifier must be a string")
         if not secret:
-            raise AttributeError("secret cannot be an empty string")
+            raise AttributeError("secret cannot be empty")
         if not identifier:
-            raise AttributeError("identifier cannot be an empty string")
+            raise AttributeError("identifier cannot be empty")
 
         key = f"_redact_{identifier}"
 
@@ -397,7 +398,10 @@ class TapeDeck(AbstractContextManager):
                 raise AttributeError(
                     f"{identifier} was not used during recording to redact this secret"
                 )
-            return (identifier + ("_" * secretlen))[:secretlen]
+            result = (identifier + ("_" * secretlen))[:secretlen]
+            if isinstance(secret, bytes):
+                result = result.encode()
+            return result
 
     def _advance(self, context: CallContext, channel: str) -> str:
         """
@@ -510,7 +514,10 @@ class TapeDeck(AbstractContextManager):
         """
         msg = f"TAPE: {category}({action}): {msg}"
         for secret, replacement in self._redactions.items():
-            msg = msg.replace(secret, replacement)
+            if isinstance(secret, str):
+                msg = msg.replace(secret, replacement)
+            else:
+                msg = msg.encode().replace(secret, replacement.encode()).decode()
         self._logger.log(level, msg)
 
     def _log_ex(self, action: str, context: CallContext, ex: Exception) -> None:
@@ -559,7 +566,10 @@ class TapeDeck(AbstractContextManager):
         """
         raw = pickle.dumps(entity, protocol=self.PICKLE_PROTOCOL)
         for secret, replacement in self._redactions.items():
-            raw = raw.replace(secret.encode(), replacement.encode())
+            raw = raw.replace(
+                secret.encode() if isinstance(secret, str) else secret,
+                replacement.encode(),
+            )
         return pickle.loads(raw) if not return_bytes else raw  # nosec
 
     def _reduce_call(self, context: CallContext) -> Callable:

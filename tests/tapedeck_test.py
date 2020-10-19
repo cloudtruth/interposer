@@ -201,6 +201,8 @@ class TapeDeckTest(TestCase):
             with self.assertRaises(AttributeError):
                 # each identifier must be unique
                 uut.redact("crush", "THIS")
+            with self.assertRaises(AttributeError):
+                uut.redact("foobar".encode(), "THIS")
 
         with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
             # playback caller may not know the secret but does know the identifier
@@ -209,13 +211,14 @@ class TapeDeckTest(TestCase):
 
     def test_recording_secrets(self):
         """ Tests automatic redaction of known secrets and use in playback """
-        token = str(uuid.uuid4())
+        token = str(uuid.uuid4()).encode()
         token2 = str(uuid.uuid4())
         keeper = KeeperOfFineSecrets(token)
 
         # pretend someone created an object and made two calls where one succeeds and one raises
 
         with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
+            # use encode to test redacting bytes
             use_token = uut.redact(token, "REDACTED_SMALLER_THAN_ORIGINAL")
             assert use_token == token
             use_token2 = uut.redact(
@@ -250,9 +253,10 @@ class TapeDeckTest(TestCase):
 
         with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
             # during playback the secret passed in may not be the same as during recording
-            # however since it was redacted, the identifier is what's important
+            # however since it was redacted, the identifier is what's important; if the
+            # original was bytes, this one has to be bytes too
             redacted_token = uut.redact(
-                "not-the-original-token", "REDACTED_SMALLER_THAN_ORIGINAL"
+                "not-the-original-token".encode(), "REDACTED_SMALLER_THAN_ORIGINAL"
             )
             assert redacted_token != token
             # the redaction will have the same length as the original secret
@@ -280,8 +284,8 @@ class TapeDeckTest(TestCase):
                 assert uut.playback(
                     CallContext(call=redacted_keeper.get_token, args=(), kwargs={})
                 )
-            assert token not in str(ex.exception)
-            assert redacted_token in str(ex.exception)
+            assert token.decode() not in str(ex.exception)
+            assert redacted_token.decode() in str(ex.exception)
             uut.dump(self.datadir / "dump.yaml")
 
             # this identifier was never used during recording
