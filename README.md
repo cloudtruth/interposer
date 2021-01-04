@@ -311,14 +311,8 @@ regenerate your recording.  If this does not work, there is likely a piece
 of information in the recording that is not idempotent, such as a timestamp
 or a uuid.
 
-The easiest way to identify this is to record and then playback, scraping the
-log messages into two files, and comparing them.  Here is an example:
+If you set the logging level to 7 (more than DEBUG, which is 10), any mismatch
+encountered during playback will be accompanied by a "diff" of the
+recorded call and the requested playback call, for example:
 
-    $ RECORDING=1 tox -e debug <testname> -- --pdb -s \
-      -o log_cli=True -o log_cli_level=7 | grep TAPE | tee /tmp/record.txt
-    ...
-    $ tox -e debug <testname> -- --pdb -s \
-      -o log_cli=True -o log_cli_level=7 | grep TAPE | tee /tmp/playback.txt
-    ...
-
-When compared side-by-side, it is easier to see what data changed.
+    $ tox -e debug <testname> -- --pdb -s -o log_cli=True -o log_cli_level=7
