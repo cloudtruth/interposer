@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2019 - 2020 Tuono, Inc.
+# Copyright (C) 2019 - 2021 Tuono, Inc.
 # All Rights Reserved
 #
 from pathlib import Path
@@ -14,7 +14,7 @@ name = "interposer"
 description = "A code intercept wrapper with recording and playback options."
 major = 0
 minor = 9
-patch = 2
+patch = 3
 
 # Everything below should be cookie-cutter
 

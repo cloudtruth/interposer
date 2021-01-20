@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2019 - 2020 Tuono, Inc.
+# Copyright (C) 2019 - 2021 Tuono, Inc.
 # All Rights Reserved
 #
 import difflib
@@ -8,7 +8,7 @@ import io
 import logging
 import pickle  # nosec
 import pickletools  # nosec
-import shelve
+import shelve  # nosec
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -234,7 +234,7 @@ class TapeDeck(AbstractContextManager):
         self._reset()
 
         if self.mode == Mode.Playback:
-            self._tape = shelve.open(
+            self._tape = shelve.open(  # nosec
                 str(self.deck), flag="r", protocol=self.PICKLE_PROTOCOL
             )
             self.file_format = self._tape.get(
@@ -247,7 +247,7 @@ class TapeDeck(AbstractContextManager):
                     self.CURRENT_FILE_FORMAT,
                 )
         else:
-            self._tape = shelve.open(
+            self._tape = shelve.open(  # nosec
                 str(self.deck), flag="c", protocol=self.PICKLE_PROTOCOL
             )
             self._tape[self.LABEL_FILE_FORMAT] = self.CURRENT_FILE_FORMAT
