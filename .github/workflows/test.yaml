@@ -3,7 +3,8 @@
 # and reports coverage.
 #
 ---
-name: coverage
+name: Test
+
 on:
   pull_request:
   push:
@@ -35,8 +36,8 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v1
         with:
-          config-file: ./.github/codeql-config.yml
           languages: python
+          setup-python-dependencies: false
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v1
