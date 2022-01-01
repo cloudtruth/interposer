@@ -1,8 +1,8 @@
 # interposer
 
-[![Build Status](https://github.com/tuono/interposer/workflows/coverage/badge.svg)](https://github.com/tuono/interposer/actions?query=workflow%3Acoverage)
-[![Release Status](https://github.com/tuono/interposer/workflows/release/badge.svg)](https://github.com/tuono/interposer/actions?query=workflow%3Arelease)
-[![codecov](https://codecov.io/gh/tuono/interposer/branch/develop/graph/badge.svg?token=HKUTULQQSA)](https://codecov.io/gh/tuono/interposer)
+[![Build Status](https://github.com/cloudtruth/interposer/workflows/coverage/badge.svg)](https://github.com/cloudtruth/interposer/actions?query=workflow%3Acoverage)
+[![Release Status](https://github.com/cloudtruth/interposer/workflows/release/badge.svg)](https://github.com/cloudtruth/interposer/actions?query=workflow%3Arelease)
+[![codecov](https://codecov.io/gh/cloudtruth/interposer/branch/main/graph/badge.svg?token=JUplpBrqB0)](https://codecov.io/gh/cloudtruth/interposer)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 The interposer package core allows you to wrap a module, class, object, method,
@@ -11,7 +11,7 @@ manipulation on the arguments, result, or exception.  This behavior can either
 be "always on" (i.e. in production code) or patched in through tests.  With
 interposer you can:
 
-- Audit calls made.
+- Audit calls and their responses or exceptions.
 - Block calls that should not be made (for example, read-only vs. read-write).
 - Modify arguments before calls are made.
 - Record and playback interactions with packages for hybrid testing.
@@ -33,13 +33,19 @@ it will only take seconds when played back.
 
 ## TL;DR;
 
+Interposer can be inserted around anything - modules, classes, or functions.
+What you do with it from there is up to you.  A recording and playback system
+is provided that works with just about anything.
+
 ### Hybrid Testing
 
 To get started with hybrid testing, use the `RecordedTestCase` test fixture.
 An example of this can be found in the
 [example_weather_test](https://github.com/tuono/interposer/blob/develop/tests/example_weather_test.py).
 This is a simple test that demonstrates how easy it is to hook in recording
-and playback against an external service.
+and playback against an external service.  In contrast to projects like `vcrpy`
+which only patch into specific network libraries, interposer allows you to
+capture the call and responses for anything.
 
 To generate a recording, `RecordedTestCase` looks for an environment variable
 named `RECORDING` and if set (and not empty), will generate a recording of the
@@ -93,7 +99,7 @@ realized that it would not be practical to mock those services in our
 tests.  Mocking a complex multi-step interaction with a third party service
 such as a cloud provider can be very time-consuming and error-prone.
 Entire projects already exist which attempt to mock these service interfaces,
-and those projects are both incomplete and incorrect at any given time.
+and those projects are often both incomplete and incorrect at any given time.
 Maintaining such a footprint requires tremendous effort, and if the mock
 responses are not correct, it leads to a false sense of code quality which
 can then fail in front of a customer when used against the real thing.
@@ -120,6 +126,8 @@ tremendous for testing complex external services:
 ## Recording and Playback
 
 Interposer can be used in place of a mock to record and playback interactions.
+Unlike network-based recording and playback libraries, interposer can record
+and playback anything - be it a module, class, or function.
 There is a simple example in this repository of a Weather object that
 leverages an external service.  Mocking this service would take time, as the
 response is fairly complex, but with interposer it's as easy as adding a patch.
@@ -135,7 +143,7 @@ class and the `noaa` class that it uses.
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2020 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 from noaa_sdk import noaa
 
@@ -288,9 +296,10 @@ raise an exception when a call is not allowed.
 
 ## Secrets!
 
-The recording system has a built-in secrets redacter.  In a test method, before
-a secret is used, call `self.redact(secret)`.  If the tape deck is in recording
-mode, the secret is passed to the tape deck for redaction.  This means:
+The recording system has a built-in secrets redacter.  In a test method,
+before a secret is used, call `self.redact(secret)`.  If the tape deck is
+in recording mode, the secret is passed to the tape deck for redaction.
+This means:
 
 1. The real secret is passed to the actual call during recording.
 2. The secret is then replaced by typesafe redaction holistically and reliably
@@ -301,7 +310,8 @@ mode, the secret is passed to the tape deck for redaction.  This means:
 
 In playback mode, call `self.redact(secret)` and it will return a redacted
 string for you to use in place of the secret.  This allows the playback call
-signatures to match the recorded call signatures.
+signatures to match the recorded call signatures.  This means no special
+branches are needed to handle recording and playback separately.
 
 ## Misaligned Playback
 
@@ -312,7 +322,6 @@ of information in the recording that is not idempotent, such as a timestamp
 or a uuid.
 
 If you set the logging level to 7 (more than DEBUG, which is 10), any mismatch
-encountered during playback will be accompanied by a "diff" of the
-recorded call and the requested playback call, for example:
-
-    $ tox -e debug <testname> -- --pdb -s -o log_cli=True -o log_cli_level=7
+encountered during playback will be accompanied by a "diff" of the recorded
+call and the requested playback call.  See `make example` for tips on
+how to do this with pytest.

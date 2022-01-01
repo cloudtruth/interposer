@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2019 - 2020 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 import gzip
 import inspect
@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from typing import Callable
+from typing import ClassVar
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -45,15 +46,14 @@ class RecordedTestCase(TestCase):
     class will record what they do.  When the environment variable is not
     set, the tests run in playback mode.
 
-    NOTDONE (and maybe not necessary):
-    When the environment variable RECORDING_KEY is set, the recording is
-    encrypted and decrypted using the given key.  This is optional depending
-    on whether the recording has secrets in it.  When dealing with third party
-    packages that use tokens, they usually do.
+    Don't forget to redact secrets!
     """
 
     # the name of the directory created alongside the test script
     TAPE_DIRECTORY_NAME: str = "tapes"
+
+    # the tape deck
+    tapedeck: ClassVar[TapeDeck] = NotImplemented
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -68,6 +68,8 @@ class RecordedTestCase(TestCase):
 
         mode = Mode.Recording if os.environ.get("RECORDING") else Mode.Playback
         module = inspect.getmodule(cls)
+        assert module  # nosec
+        assert module.__file__  # nosec
         testname = Path(module.__file__).stem
         recordings = Path(module.__file__).parent / cls.TAPE_DIRECTORY_NAME / testname
 
@@ -104,7 +106,7 @@ class RecordedTestCase(TestCase):
 
         super().tearDownClass()
 
-    def redact(self, secret: str, identifier: str) -> str:
+    def redact(self, secret: Union[str, bytes], identifier: str) -> Union[str, bytes]:
         """
         In recording mode, pass in the secret and a unique identifier that
         will be present during playback that identifies the secret.  The
@@ -142,7 +144,7 @@ class TapeDeckCallHandler(CallHandler):
 
     @staticmethod
     def isrecorded(context: CallContext) -> bool:
-        """ Determines if the call is or should be recorded. """
+        """Determines if the call is or should be recorded."""
         return context.meta.get("_handler", {}).get("record", True)
 
     @staticmethod
@@ -165,6 +167,7 @@ class TapeDeckCallHandler(CallHandler):
             # playback raises an exception if one was recorded
             result = self._self_deck.playback(context, channel=self._self_channel)
             return CallBypass(result)
+        return None
 
     def on_call_end_exception(self, context: CallContext, ex: Exception) -> None:
         """

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2019 - 2020 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 import inspect
 

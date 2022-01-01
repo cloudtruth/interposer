@@ -1,57 +1,32 @@
-#
-# Copyright (C) 2019 - 2020 Tuono, Inc.
-# All Rights Reserved
-#
+# runs on releases (prereleased or released)
+# publishes package to test.pypi.org or actual
 ---
-name: release
+name: Release
+
 on:
   release:
     types:
-      - published
+      - prereleased
+      - released
 
 jobs:
-  publish-gemfury:
-    # publishes a pypi package to GemFury
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.7.7]
+    timeout-minutes: 10
 
     steps:
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "${GITHUB_CONTEXT}"
-
       - uses: actions/checkout@v2
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+      - name: Build and Publish (Prerelease)
+        if: "github.event.release.prerelease"
+        uses: JRubics/poetry-publish@v1.9
         with:
-          python-version: ${{ matrix.python-version }}
+          pypi_token: ${{ secrets.PYPI_TEST_TOKEN }}
+          repository_name: "testpypi"
+          repository_url: "https://test.pypi.org/legacy/"
 
-      - name: Install Build Dependencies
-        run: python3 -m pip install -rrequirements/ci.txt
-
-      - name: Publish
-        id: publish
-        run: |
-          rm -rf dist/
-          VERSION=$(python3 setup.py --version)
-          echo "::set-output name=version::$VERSION"
-          python3 setup.py sdist
-          PACKAGE=$(ls dist/*)
-          curl --fail -F package=@${PACKAGE} https://${{ secrets.GEMFURY_PUSH_TOKEN }}@push.fury.io/tuono/
-
-      - name: Show Version
-        run: echo "${{ steps.publish.outputs.version }}"
-
-      - name: Notify
-        uses: homoluctus/slatify@v2.1.0
-        if: always()
+      - name: Build and Publish (Release)
+        if: "!github.event.release.prerelease"
+        uses: JRubics/poetry-publish@v1.9
         with:
-          type: ${{ job.status }}
-          job_name: ${{ github.repository }} publish ${{ steps.publish.outputs.version }} to gemfury
-          username: tubot
-          icon_emoji: ":monorail:"
-          url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          pypi_token: ${{ secrets.PYPI_TOKEN }}

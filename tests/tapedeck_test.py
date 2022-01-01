@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2019 - 2020 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 import logging
 import os
@@ -28,7 +28,7 @@ class SomeClass(object):
         self.logger = logging.getLogger(__name__)
         self.thing = thing
 
-    def amethod(self) -> str:
+    def amethod(self) -> uuid.UUID:
         return uuid.uuid4()
 
 
@@ -91,7 +91,7 @@ class TapeDeckTest(TestCase):
 
         # proves the same method call on a class with the same configuration
         # yields the same hash
-        assert result1 == result2
+        self.assertEqual(result1, result2)
 
         somethirdclass = SomeClass("bar")  # not foo like the original
 
@@ -102,7 +102,7 @@ class TapeDeckTest(TestCase):
 
         # proves that if the object has a different configuration it is technically
         # a different call
-        assert result1 != result3
+        self.assertNotEqual(result1, result3)
 
     def test_record_playback(self):
         """
@@ -138,12 +138,12 @@ class TapeDeckTest(TestCase):
             # replay the reverse channel first proving there is no global call order
             with self.assertRaises(NotImplementedError):
                 uut.playback(self.context2, channel="reverse")
-            assert uut.playback(self.context1, channel="reverse") == "dean"
+            self.assertEqual(uut.playback(self.context1, channel="reverse"), "dean")
             self.context1.meta.pop(TapeDeck.LABEL_TAPE)
             self.context2.meta.pop(TapeDeck.LABEL_TAPE)
             # now the default channel
             uut._logger.setLevel(logging.INFO)
-            assert uut.playback(self.context1) == "dean"
+            self.assertEqual(uut.playback(self.context1), "dean")
             with self.assertRaises(NotImplementedError):
                 uut.playback(self.context2)
             self.context1.meta.pop(TapeDeck.LABEL_TAPE)
@@ -153,14 +153,21 @@ class TapeDeckTest(TestCase):
                 uut.playback(self.context1)
 
     def test_open_close_twice(self):
-        """ Tests calling open and close twice. """
+        """Tests calling open and close twice."""
         with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
             with self.assertRaises(TapeDeckOpenError):
                 uut.open()  # 2nd time, not idempotent (works as designed)
         uut.close()  # 2nd time, idempotent
 
+    def test_dump_closed(self):
+        """Tests calling dump when not open."""
+        with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
+            pass
+        with self.assertRaises(TapeDeckOpenError):
+            uut.dump(Path())  # not open!
+
     def test_recording_too_old(self):
-        """ Tests opening a file where the recording is too old. """
+        """Tests opening a file where the recording is too old."""
         with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
             uut.record(self.context1, "dean", None)
         save = TapeDeck.EARLIEST_FILE_FORMAT_SUPPORTED
@@ -191,12 +198,14 @@ class TapeDeckTest(TestCase):
                 uut.redact("foo", "")
 
             # identifier longer than secret gets clipped
-            assert uut.redact("123456789", "THIS_IS_A_REDACTED_COUNT") == "123456789"
-            assert uut._redactions.get("123456789") == "THIS_IS_A"
+            self.assertEqual(
+                uut.redact("123456789", "THIS_IS_A_REDACTED_COUNT"), "123456789"
+            )
+            self.assertEqual(uut._redactions.get("123456789"), "THIS_IS_A")
 
             # identifier shorter than secret gets padded
-            assert uut.redact("candycane", "THIS") == "candycane"
-            assert uut._redactions.get("candycane") == "THIS_____"
+            self.assertEqual(uut.redact("candycane", "THIS"), "candycane")
+            self.assertEqual(uut._redactions.get("candycane"), "THIS_____")
 
             with self.assertRaises(AttributeError):
                 # each identifier must be unique
@@ -206,11 +215,11 @@ class TapeDeckTest(TestCase):
 
         with TapeDeck(self.datadir / "recording", Mode.Playback) as uut:
             # playback caller may not know the secret but does know the identifier
-            assert uut.redact("foo", "THIS_IS_A_REDACTED_COUNT") == "THIS_IS_A"
-            assert uut.redact("foo", "THIS") == "THIS_____"
+            self.assertEqual(uut.redact("foo", "THIS_IS_A_REDACTED_COUNT"), "THIS_IS_A")
+            self.assertEqual(uut.redact("foo", "THIS"), "THIS_____")
 
     def test_recording_secrets(self):
-        """ Tests automatic redaction of known secrets and use in playback """
+        """Tests automatic redaction of known secrets and use in playback"""
         token = str(uuid.uuid4()).encode()
         token2 = str(uuid.uuid4())
         keeper = KeeperOfFineSecrets(token)
@@ -220,11 +229,11 @@ class TapeDeckTest(TestCase):
         with TapeDeck(self.datadir / "recording", Mode.Recording) as uut:
             # use encode to test redacting bytes
             use_token = uut.redact(token, "REDACTED_SMALLER_THAN_ORIGINAL")
-            assert use_token == token
+            self.assertEqual(use_token, token)
             use_token2 = uut.redact(
                 token2, "REDACTED_LARGER_THAN_ORIGINAL_AND_THAT_IS_OKAY"
             )
-            assert use_token2 == token2
+            self.assertEqual(use_token2, token2)
             uut.record(
                 CallContext(
                     call=KeeperOfFineSecrets,
@@ -247,7 +256,7 @@ class TapeDeckTest(TestCase):
             with self.assertRaises(AttributeError):
                 uut.redact("foo", "REDACTED_SMALLER_THAN_ORIGINAL")
             # but if the secret is the same that is not an error
-            assert uut.redact(token, "REDACTED_SMALLER_THAN_ORIGINAL") == token
+            self.assertEqual(uut.redact(token, "REDACTED_SMALLER_THAN_ORIGINAL"), token)
 
         # now during playback see everything with a secret (token) has been redacted!
 
@@ -258,14 +267,14 @@ class TapeDeckTest(TestCase):
             redacted_token = uut.redact(
                 "not-the-original-token".encode(), "REDACTED_SMALLER_THAN_ORIGINAL"
             )
-            assert redacted_token != token
+            self.assertNotEqual(redacted_token, token)
             # the redaction will have the same length as the original secret
-            assert len(redacted_token) == len(token)
+            self.assertEqual(len(redacted_token), len(token))
             redacted_token2 = uut.redact(
                 "not-the-original-token2",
                 "REDACTED_LARGER_THAN_ORIGINAL_AND_THAT_IS_OKAY",
             )
-            assert redacted_token2 != token2
+            self.assertNotEqual(redacted_token2, token2)
             redacted_keeper = uut.playback(
                 CallContext(
                     call=KeeperOfFineSecrets,
@@ -273,19 +282,21 @@ class TapeDeckTest(TestCase):
                     kwargs={"other": redacted_token2},
                 )
             )
-            assert redacted_keeper.get_token() == redacted_token
-            assert (
+            self.assertEqual(redacted_keeper.get_token(), redacted_token)
+            self.assertEqual(
                 uut.playback(
                     CallContext(call=redacted_keeper.get_token, args=(), kwargs={})
-                )
-                == redacted_token
+                ),
+                redacted_token,
             )
             with self.assertRaises(ValueError) as ex:
-                assert uut.playback(
-                    CallContext(call=redacted_keeper.get_token, args=(), kwargs={})
+                self.assertTrue(
+                    uut.playback(
+                        CallContext(call=redacted_keeper.get_token, args=(), kwargs={})
+                    )
                 )
-            assert token.decode() not in str(ex.exception)
-            assert redacted_token.decode() in str(ex.exception)
+            self.assertNotIn(token.decode(), str(ex.exception))
+            self.assertIn(redacted_token.decode(), str(ex.exception))
             uut.dump(self.datadir / "dump.yaml")
 
             # this identifier was never used during recording
