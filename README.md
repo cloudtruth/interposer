@@ -1,6 +1,6 @@
 # interposer
 
-[![Build Status](https://github.com/cloudtruth/interposer/workflows/test/badge.svg)](https://github.com/cloudtruth/interposer/actions?query=workflow%3Atest)
+[![Build Status](https://github.com/cloudtruth/interposer/workflows/Test/badge.svg)](https://github.com/cloudtruth/interposer/actions?query=workflow%3Atest)
 [![Release Status](https://github.com/cloudtruth/interposer/workflows/release/badge.svg)](https://github.com/cloudtruth/interposer/actions?query=workflow%3Arelease)
 [![codecov](https://codecov.io/gh/cloudtruth/interposer/branch/main/graph/badge.svg?token=JUplpBrqB0)](https://codecov.io/gh/cloudtruth/interposer)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
