@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2020 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 import gzip
 import os
@@ -15,6 +15,7 @@ from unittest.mock import patch
 from noaa_sdk import noaa
 
 from interposer import CallBypass
+from interposer import CallContext
 from interposer import CallHandler
 from interposer import Interposer
 from interposer import isinterposed
@@ -38,15 +39,16 @@ class DoNotRecordCallHandler(CallHandler):
     Tells the framework not to record almost anything.
     """
 
-    def on_call_end_result(self, context: CallHandler, result: Any) -> Any:
+    def on_call_end_result(self, context: CallContext, result: Any) -> Any:
         if result == 42:
             TapeDeckCallHandler.norecord(context)
         return result
 
     def on_call_end_exception(
-        self, context: CallHandler, ex: Exception
+        self, context: CallContext, ex: Exception
     ) -> Optional[Exception]:
         TapeDeckCallHandler.norecord(context)
+        return None
 
 
 class RewrapCallHandler(CallHandler):
@@ -54,8 +56,9 @@ class RewrapCallHandler(CallHandler):
     Tells the framework to rewrap everything it sees.
     """
 
-    def on_call_begin(self, context: CallHandler) -> Optional[CallBypass]:
+    def on_call_begin(self, context: CallContext) -> Optional[CallBypass]:
         context.rewrap = True
+        return None
 
 
 class TestRecordedTestCase(RecordedTestCase):
@@ -72,6 +75,12 @@ class TestRecordedTestCase(RecordedTestCase):
         Set the recording environment variable because we record first.
         """
         os.environ["RECORDING"] = "1"
+
+        # pre-create a recording file that the setup code will unlink (for coverage)
+        recordings = Path(__file__).parent / cls.TAPE_DIRECTORY_NAME / "recorder_test"
+        recordings.mkdir(parents=True, exist_ok=True)
+        recording = recordings / "TestRecordedTestCase.db"
+        recording.touch(exist_ok=False)
         super().setUpClass()
 
     @classmethod
@@ -108,7 +117,7 @@ class TestRecordedTestCase(RecordedTestCase):
         RECORDING environment variable.
         """
         # self.tapedeck is set up by the fixture
-        assert self.tapedeck.mode == Mode.Recording
+        self.assertEqual(self.tapedeck.mode, Mode.Recording)
 
         # the channel name is our test method name
         channel = self.id().split(".")[-1]
@@ -121,7 +130,7 @@ class TestRecordedTestCase(RecordedTestCase):
             new=Interposer(noaa, TapeDeckCallHandler(self.tapedeck, channel=channel)),
         ):
             uut = Weather()
-            assert len(uut.forecast("01001", "US", False, 3)) == 3
+            self.assertEqual(len(uut.forecast("01001", "US", False, 3)), 3)
             with self.assertRaises(Exception):
                 uut.forecast("99999", "ZZ", False, 1)
 
@@ -129,7 +138,7 @@ class TestRecordedTestCase(RecordedTestCase):
         # call 1: 1st forecast()
         # call 2: 2nd forecast()
         # ordinal is left at the latest call ordinal
-        assert self.tapedeck._call_ordinals[channel] == 2
+        self.assertEqual(self.tapedeck._call_ordinals[channel], 2)
 
         """
         This next part is not typical usage.  Normally you run the test with
@@ -153,7 +162,7 @@ class TestRecordedTestCase(RecordedTestCase):
                 ),
             ):
                 uut = Weather()
-                assert len(uut.forecast("01001", "US", False, 3)) == 3
+                self.assertEqual(len(uut.forecast("01001", "US", False, 3)), 3)
                 with self.assertRaises(Exception):
                     uut.forecast("99999", "ZZ", False, 1)
 
@@ -181,14 +190,14 @@ class TestRecordedTestCase(RecordedTestCase):
                 uuid.uuid4, TapeDeckCallHandler(self.tapedeck, "test_cannot_pickle")
             ),
         ):
-            assert len(str(uuid.uuid4())) == 36
+            self.assertEqual(len(str(uuid.uuid4())), 36)
 
     def test_selective_recording(self) -> None:
         """
         Tests ability to selectively record.
         """
         # self.tapedeck is set up by the fixture
-        assert self.tapedeck.mode == Mode.Recording
+        self.assertEqual(self.tapedeck.mode, Mode.Recording)
 
         uut = Interposer(
             SomeClass(),
@@ -201,21 +210,25 @@ class TestRecordedTestCase(RecordedTestCase):
         # we will make three calls, but only one will record; if all of them
         # were to record the ordinal count for the channel would be at 2 (0, 1, 2)
 
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") is None
-        assert uut.times_two(21) == 42  # when result is 42 recording disabled
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") is None
-        assert uut.times_two(42) == 84  # this one advances to ordinal zero
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") == 0
+        self.assertIsNone(self.tapedeck._call_ordinals.get("test_selective_recording"))
+        self.assertEqual(uut.times_two(21), 42)  # when result is 42 recording disabled
+        self.assertIsNone(self.tapedeck._call_ordinals.get("test_selective_recording"))
+        self.assertEqual(uut.times_two(42), 84)  # this one advances to ordinal zero
+        self.assertEqual(
+            self.tapedeck._call_ordinals.get("test_selective_recording"), 0
+        )
         with self.assertRaises(ValueError):
             uut.raise_exception()  # no exceptions are being recorded
-        assert self.tapedeck._call_ordinals.get("test_selective_recording") == 0
+        self.assertEqual(
+            self.tapedeck._call_ordinals.get("test_selective_recording"), 0
+        )
 
     def test_selective_rewrap(self) -> None:
         """
         Tests ability to selectively rewrap result even during playback.
         """
         # self.tapedeck is set up by the fixture
-        assert self.tapedeck.mode == Mode.Recording
+        self.assertEqual(self.tapedeck.mode, Mode.Recording)
 
         uut = Interposer(
             SomeClass(),
@@ -226,7 +239,7 @@ class TestRecordedTestCase(RecordedTestCase):
         )
 
         # is it rewrapped after recording?
-        assert isinterposed(uut.times_two(21))
+        self.assertTrue(isinterposed(uut.times_two(21)))
 
         self.tapedeck.close()
         self.tapedeck.mode = Mode.Playback
@@ -241,7 +254,7 @@ class TestRecordedTestCase(RecordedTestCase):
         )
 
         # is it rewrapped, even during playback?
-        assert isinterposed(uut.times_two(21))
+        self.assertTrue(isinterposed(uut.times_two(21)))
 
         # put it back into Recording mode so the fixture can clean up
         self.tapedeck.close()
@@ -288,8 +301,10 @@ class SecretsTestCase(RecordedTestCase):
             with gzip.open(datafile, "rb") as fin:
                 raw = fin.read()
                 for secret, replacement in redactions.items():
-                    assert (
-                        secret.encode() not in raw
+                    assert (  # nosec
+                        isinstance(secret, bytes) and secret not in raw
+                    ) or (
+                        isinstance(secret, str) and secret.encode() not in raw
                     ), "a secret leaked into the recording!"
             datafile.unlink()
         os.environ.pop("RECORDING")
@@ -315,22 +330,22 @@ class SecretsTestCase(RecordedTestCase):
         # post-processing redaction list and after the recording file is closed
         # the secrets get redacted; in playback mode this redacts it immediately
         # so the playback matches the recording
-        assert not self.tapedeck._redactions
+        self.assertFalse(self.tapedeck._redactions)
         uut = cls(self.redact(self.token, "TOKEN"))
-        assert self.tapedeck._redactions
-        assert uut.get_token() == self.redact(self.token, "TOKEN2")
+        self.assertTrue(self.tapedeck._redactions)
+        self.assertEqual(uut.get_token(), self.redact(self.token, "TOKEN2"))
 
         self.tapedeck.close()  # applies redaction to recording
         self.tapedeck.mode = Mode.Playback
         self.tapedeck.open()
 
-        assert not self.tapedeck._redactions
+        self.assertFalse(self.tapedeck._redactions)
         uut = cls(self.redact("foo", "TOKEN"))
         foo = self.redact("foo", "TOKEN")
-        assert foo == "TOKEN_______________________________"
+        self.assertEqual(foo, "TOKEN_______________________________")
 
         # most importantly, the object initializer argument was redacted
-        assert uut.get_token() == foo
+        self.assertEqual(uut.get_token(), foo)
         with self.assertRaises(RecordedCallNotFoundError):
             uut.get_token()
 

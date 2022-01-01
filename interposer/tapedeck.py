@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # Copyright (C) 2019 - 2021 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 import difflib
 import io
@@ -18,6 +18,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from typing import Callable
+from typing import cast
 from typing import Dict
 from typing import Optional
 from typing import Union
@@ -47,7 +48,7 @@ class Payload:
 
     context: CallContext
     result: Any
-    ex: Exception
+    ex: Optional[Exception]
 
 
 class TapeDeckError(RuntimeError):
@@ -170,7 +171,7 @@ class TapeDeck(AbstractContextManager):
             mode (Mode): The operational mode - Playback or Recording.
         """
         self.deck = deck
-        self.file_format = None
+        self.file_format: int = 0
         self.mode = mode
 
         # call ordinal key (channel name) and value (ordinal number)
@@ -178,35 +179,41 @@ class TapeDeck(AbstractContextManager):
         self._logger = logging.getLogger(__name__)
         self._redactions: Dict[Union[str, bytes], str] = dict()
         # the open file resource
-        self._tape = None
+        self._tape: shelve.Shelf[object] = NotImplemented
 
     def __enter__(self):
-        """ AbstractContextManager """
+        """AbstractContextManager"""
         self.open()
         return self
 
     def __exit__(self, *exc_details):
-        """ AbstractContextManager """
+        """AbstractContextManager"""
         self.close()
 
     def dump(self, outfile: Path) -> None:
         """
         Dump the database file for analysis.
 
-        The resulting file format is:
+        The resulting output is:
 
         _file_format: N
         channel:
           - payload (sorted by ordinal)
+
+        Raises:
+            TapeDeckOpenError if the tape deck is not open.
         """
-        results = {}
+        results: Dict[str, Any] = {}
+
+        if self._tape == NotImplemented:
+            raise TapeDeckOpenError()
 
         for key in self._tape.keys():
             payload = self._tape[key]
             if key[0] == "_":
                 results[key] = payload
             else:
-                channel = payload.context.meta["tape"]["channel"]
+                channel = payload.context.meta["tape"]["channel"]  # type: ignore
                 results.setdefault(channel, []).append(payload)
 
         for channel in results.keys():
@@ -228,7 +235,7 @@ class TapeDeck(AbstractContextManager):
             TapeDeckOpenError if the tape deck is already open.
             RecordingTooOldError if the recording file version is not supported.
         """
-        if self._tape:
+        if self._tape != NotImplemented:
             raise TapeDeckOpenError()
 
         self._reset()
@@ -237,8 +244,11 @@ class TapeDeck(AbstractContextManager):
             self._tape = shelve.open(  # nosec
                 str(self.deck), flag="r", protocol=self.PICKLE_PROTOCOL
             )
-            self.file_format = self._tape.get(
-                self.LABEL_FILE_FORMAT, self._tape.get(self.LABEL_VERSION, 1)
+            self.file_format = cast(
+                int,
+                self._tape.get(
+                    self.LABEL_FILE_FORMAT, self._tape.get(self.LABEL_VERSION, 1)
+                ),
             )
             if self.file_format < self.EARLIEST_FILE_FORMAT_SUPPORTED:
                 raise RecordingTooOldError(
@@ -266,9 +276,9 @@ class TapeDeck(AbstractContextManager):
 
         If the tape deck is not open, this does nothing.
         """
-        if self._tape:  # prevents errors closing after failed open()
+        if self._tape != NotImplemented:  # prevents errors closing after failed open()
             self._tape.close()
-            self._tape = None
+            self._tape = NotImplemented
             self._log(
                 logging.DEBUG,
                 "close",
@@ -330,10 +340,10 @@ class TapeDeck(AbstractContextManager):
             If an exception was recorded for this call, it is raised.
         """
         uniq = self._advance(context, channel)
-        recorded = self._tape.get(uniq, RecordedCallNotFoundError(context))
-        if isinstance(recorded, RecordedCallNotFoundError):
+        recorded: Payload = cast(Payload, self._tape.get(uniq, NotImplemented))
+        if recorded is NotImplemented:
             self._forensics(context, channel)
-            raise recorded
+            raise RecordedCallNotFoundError(context)
 
         payload = recorded
 
@@ -344,7 +354,7 @@ class TapeDeck(AbstractContextManager):
             self._log_ex("playback", context, payload.ex)
             raise payload.ex
 
-    def redact(self, secret: Union[str, bytes], identifier: str) -> str:
+    def redact(self, secret: Union[str, bytes], identifier: str) -> Union[str, bytes]:
         """
         Auto-track secrets for redaction.
 
@@ -393,14 +403,14 @@ class TapeDeck(AbstractContextManager):
             self._tape[key] = secretlen
             return secret
         else:
-            secretlen = self._tape.get(key)
+            secretlen = cast(int, self._tape.get(key))
             if not secretlen:
                 raise AttributeError(
                     f"{identifier} was not used during recording to redact this secret"
                 )
             result = (identifier + ("_" * secretlen))[:secretlen]
             if isinstance(secret, bytes):
-                result = result.encode()
+                return result.encode()
             return result
 
     def _advance(self, context: CallContext, channel: str) -> str:
@@ -442,14 +452,16 @@ class TapeDeck(AbstractContextManager):
         """
         ordinal = self._call_ordinals[channel]
 
-        recorded_raw = self._tape.get(f"_call_{channel}_{ordinal}")
+        recorded_raw = cast(bytes, self._tape.get(f"_call_{channel}_{ordinal}"))
         playback_call = self._reduce_call(context)
         try:
             playback_raw = self._redact(context, return_bytes=True)
         finally:
             context.call = playback_call
 
-        assert recorded_raw != playback_raw, "why did we get RecordedCallNotFoundError?"
+        assert (  # nosec
+            recorded_raw != playback_raw
+        ), "why did we get RecordedCallNotFoundError?"
 
         if recorded_raw is not None:
             recorded_io = io.StringIO()
@@ -579,7 +591,7 @@ class TapeDeck(AbstractContextManager):
 
         Returns:
             The original call so it can be replaced after recording
-            using a fianlly block.
+            using a finally block.
         """
         sig = repr(context.call)
         pos = 0
@@ -594,11 +606,11 @@ class TapeDeck(AbstractContextManager):
             sig = sig[:pos] + "0decafcoffee" + sig[end:]
             pos += 12
         result = context.call
-        context.call = sig
+        context.call = sig  # type: ignore
         return result
 
     def _reset(self) -> None:
-        """ Clean out stuff at open and close. """
-        self.file_format = None
+        """Clean out stuff at open and close."""
+        self.file_format = 0
         self._call_ordinals = dict()
         self._redactions = dict()

@@ -1,8 +1,5 @@
 #
-# Copyright (C) 2019 - 2020 Tuono, Inc.
-# All Rights Reserved
-#
-# On a pull request or push into master, this runs the unit tests
+# On a pull request or push into main, this runs the unit tests
 # and reports coverage.
 #
 ---
@@ -11,43 +8,66 @@ on:
   pull_request:
   push:
     branches:
-      - develop
-      - release/*
-      - trunk
+      - main
 
 jobs:
-  coverage:
+  analyze:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.7.7]
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
 
     steps:
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "${GITHUB_CONTEXT}"
+      - uses: actions/checkout@v2
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - run: make setup
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v1
+        with:
+          config-file: ./.github/codeql-config.yml
+          languages: python
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v1
+
+  coverage:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.7"
+          - "3.8"
+          - "3.9"
+          - "3.10"
+
+    steps:
       - uses: actions/checkout@v2
 
-      - name: Install Build Dependencies
-        run: python3 -m pip install -rrequirements/ci.txt
-
-      - name: Enforce pre-commit
-        run: |
-          python3 -m pip install pre-commit
-          pre-commit install
-          pre-commit run -a
-
-      - name: Build, Test, Coverage
-        run: make coverage
-
-      - uses: codecov/codecov-action@v1
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.xml
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - run: make setup
+
+      - run: make lint
+        if: "startsWith('3.9.', matrix.python-version)"
+
+      - run: make coverage
+
+      - uses: codecov/codecov-action@v2
+        if: "startsWith('3.9.', matrix.python-version)"

@@ -1,3 +1,0 @@
-noaa-sdk (~= 0.1.18)
-pytest (~= 6.0)
-pytest-cov (~= 2.10)

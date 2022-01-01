@@ -1,19 +1,14 @@
 #
-# Copyright (C) 2019 - 2020 Tuono, Inc.
-# All Rights Reserved
+# Copyright (C) 2019 - 2021 Tuono, Inc.
+# Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 
-PROJECT := interposer
-
-STAGEDIR := ~/.cache/pypiserver/$(PROJECT)
-
-.PHONY: all clean dist example pdb prerequisites shell stage test test-loop test-setup
+.PHONY: all clean coverage dist example lint pdb prerequisites setup test test-loop
 
 all: test
 
 clean:
 	@rm -f  .coverage
-	@rm -rf .tox
 	@rm -rf build
 	@rm -f  coverage.xml
 	@rm -rf dist
@@ -22,40 +17,36 @@ clean:
 	@find . -name '__pycache__' | xargs rm -rf
 
 coverage:
-	tox -e coverage
+	poetry run pytest -v --cov --cov-report=term-missing --cov-report=xml
 
 dist: clean
-	STAGEDIR=$(STAGEDIR) python3 setup.py sdist
+	poetry build
 
 example:
-	# requires "make prerequisites" to have been run once before
+	# requires "make prerequisites" and "make setup" to have been run once before
 	# to record: time RECORDING=1 make example
 	# to playback: time make example
 	# log level 7 includes logging results
-	tox tests/example_weather_test.py -- -o log_cli=True -o log_cli_level=7 -s
+	poetry run pytest -o log_cli=true -o log_cli_level=7 tests/example_weather_test.py
+
+lint:
+	poetry run pre-commit run -a
 
 pdb:
-	tox -- --pdb
+	poetry run pytest --pdb
 
+# this may require that ~/.local/bin is in your PATH
 prerequisites:
-	python3 -m pip install --user -r requirements/build.txt
-	@if [ -z `which pre-commit` ]; then \
-	    echo "Add $HOME/.local/bin to your path (try source ~/.profile) and make prerequisites again."; exit 1; fi
-	pre-commit install
+	python3 -m pip install -U poetry
 
-stage: dist
-	@mkdir -p $(STAGEDIR)
-	cp -p dist/* $(STAGEDIR)
-	@ls -ls $(STAGEDIR)
+setup:
+	poetry config virtualenvs.in-project true
+	poetry install
+	poetry run pre-commit install
 
-stage-clean:
-	@rm -rf $(STAGEDIR)
-
-test: test-setup
-	tox
+test:
+	poetry run pytest
 
 test-loop:
 	while make test; do :; done
 
-test-setup:
-	python3 setup.py check
