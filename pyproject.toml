@@ -22,7 +22,7 @@ pyyaml = "^6.0"
 wrapt = "^1.13.3"
 
 [tool.poetry.dev-dependencies]
-bandit = "^1.7.1"
+bandit = "^1.7.4"
 coverage = "^6.3.2"
 flake8 = "^4.0.1"
 flake8-sfs = "^0.0.3"
