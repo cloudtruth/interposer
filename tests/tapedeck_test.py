@@ -9,7 +9,6 @@ import pickle  # nosec
 import shutil
 import tempfile
 import uuid
-
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path

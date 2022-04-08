@@ -6,7 +6,6 @@
 import gzip
 import os
 import uuid
-
 from pathlib import Path
 from typing import Any
 from typing import Optional

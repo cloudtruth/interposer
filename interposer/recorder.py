@@ -6,7 +6,6 @@
 import gzip
 import inspect
 import os
-
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
