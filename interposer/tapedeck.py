@@ -9,7 +9,6 @@ import logging
 import pickle  # nosec
 import pickletools  # nosec
 import shelve  # nosec
-
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import auto

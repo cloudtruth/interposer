@@ -4,7 +4,6 @@
 # Copyright (C) 2021 - 2022 CloudTruth, Inc.
 #
 import inspect
-
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
