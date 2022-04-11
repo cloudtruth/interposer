@@ -72,5 +72,5 @@ jobs:
 
       - run: make coverage
 
-      - uses: codecov/codecov-action@v2
+      - uses: codecov/codecov-action@v3
         if: "startsWith('3.9.', matrix.python-version)"
