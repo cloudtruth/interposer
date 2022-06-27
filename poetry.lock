@@ -680,7 +680,7 @@ reference = "pypi-public"
 
 [[package]]
 name = "types-pyyaml"
-version = "6.0.7"
+version = "6.0.9"
 description = "Typing stubs for PyYAML"
 category = "dev"
 optional = false
@@ -779,7 +779,7 @@ reference = "pypi-public"
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.11"
-content-hash = "7f04246af63be55e703755351ab731e491731c8ef769798a70105039ac68e94c"
+content-hash = "20419a7ba21801d5a9239ac1d826cf71353d4db37a7149ddf5f45f76094fcef2"
 
 [metadata.files]
 atomicwrites = [
@@ -1055,8 +1055,8 @@ typed-ast = [
     {file = "typed_ast-1.5.1.tar.gz", hash = "sha256:484137cab8ecf47e137260daa20bafbba5f4e3ec7fda1c1e69ab299b75fa81c5"},
 ]
 types-pyyaml = [
-    {file = "types-PyYAML-6.0.7.tar.gz", hash = "sha256:59480cf44595d836aaae050f35e3c39f197f3a833679ef3978d97aa9f2fb7def"},
-    {file = "types_PyYAML-6.0.7-py3-none-any.whl", hash = "sha256:7b273a34f32af9910cf9405728c9d2ad3afc4be63e4048091a1a73d76681fe67"},
+    {file = "types-PyYAML-6.0.9.tar.gz", hash = "sha256:33ae75c84b8f61fddf0c63e9c7e557db9db1694ad3c2ee8628ec5efebb5a5e9b"},
+    {file = "types_PyYAML-6.0.9-py3-none-any.whl", hash = "sha256:b738e9ef120da0af8c235ba49d3b72510f56ef9bcc308fc8e7357100ff122284"},
 ]
 typing-extensions = [
     {file = "typing_extensions-4.0.1-py3-none-any.whl", hash = "sha256:7f001e5ac290a0c0401508864c7ec868be4e701886d5b573a9528ed3973d9d3b"},
