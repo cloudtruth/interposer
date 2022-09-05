@@ -19,7 +19,7 @@ jobs:
 
       - name: Build and Publish (Prerelease)
         if: "github.event.release.prerelease"
-        uses: JRubics/poetry-publish@v1.10
+        uses: JRubics/poetry-publish@v1.13
         with:
           pypi_token: ${{ secrets.PYPI_TEST_TOKEN }}
           repository_name: "testpypi"
@@ -27,6 +27,6 @@ jobs:
 
       - name: Build and Publish (Release)
         if: "!github.event.release.prerelease"
-        uses: JRubics/poetry-publish@v1.10
+        uses: JRubics/poetry-publish@v1.13
         with:
           pypi_token: ${{ secrets.PYPI_TOKEN }}
